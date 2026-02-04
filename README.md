@@ -58,6 +58,17 @@ Telegram-бот на TypeScript (Telegraf.js + SQLite) для планирова
   npm start
   ```
 
+- **Запуск через Docker Compose**:
+
+  1. Создайте `.env` из `.env.example` и укажите `BOT_TOKEN` и `ADMIN_IDS`.
+  2. Соберите и запустите контейнер:
+
+     ```bash
+     docker compose up -d --build
+     ```
+
+  База SQLite хранится в Docker-томе `bot-data` и сохраняется между перезапусками. Логи: `docker compose logs -f bot`.
+
 База данных создаётся автоматически при первом запуске (включая папку `data`, если её нет).
 
 ## Команды бота
