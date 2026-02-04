@@ -1,0 +1,25 @@
+{
+  "name": "jw-talks-planner",
+  "version": "1.0.0",
+  "description": "Telegram-бот для ответственных за публичные речи в собрании Свидетелей Иеговы",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc"
+  },
+  "keywords": ["telegram", "bot", "telegraf", "sqlite", "jw"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.6.0",
+    "dotenv": "^16.4.5",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
