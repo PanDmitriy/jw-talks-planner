@@ -1,19 +1,27 @@
 /**
- * Команда /edit — редактирование публичной речи по ID
+ * Команда /edit — редактирование публичной речи (выбор по дате и кнопкам)
  */
 
 import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
-import { talksRepo, congregationsRepo } from '../../db';
+import { talksRepo, congregationsRepo, getTitleForTalk } from '../../db';
 import type { TalkInput } from '../../db/types';
 
-type EditStep = 'field' | 'date' | 'song' | 'talk_number' | 'title' | 'speaker_name' | 'speaker_phone';
+type EditStep =
+  | 'congregation'
+  | 'date'   // выбор даты из списка или ввод новой даты
+  | 'field'
+  | 'song'
+  | 'talk_number'
+  | 'speaker_name'
+  | 'speaker_phone';
 
 interface EditTalkState {
   step: EditStep;
-  talkId: number;
+  congregationId?: number;
+  talkId?: number;
 }
 
 const editState = new Map<number, EditTalkState>();
@@ -33,29 +41,93 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     const ids = ctx.congregationIds ?? [];
     if (ids.length === 0) return;
 
-    const text = (ctx.message as { text?: string })?.text?.trim() ?? '';
-    const args = text.split(/\s+/).slice(1);
-    const idStr = args[0];
-    const talkId = idStr ? parseInt(idStr, 10) : NaN;
-    if (isNaN(talkId) || talkId < 1) {
-      await ctx.reply('Использование: /edit <id>\nПример: /edit 5\n(ID речи можно посмотреть в /list)');
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (ids.length === 1) {
+      const list = talks.listByCongregation(ids[0], { fromDate: today });
+      const dates = [...new Set(list.map((t) => t.date))].sort();
+      if (dates.length === 0) {
+        await ctx.reply('Нет предстоящих речей для редактирования. Добавить: /add');
+        return;
+      }
+      editState.set(userId, { step: 'date', congregationId: ids[0] });
+      const dateButtons = dates.map((d) => Markup.button.callback(d, `edit:date:${d}`));
+      await ctx.reply(
+        'Выберите дату:',
+        Markup.inlineKeyboard(dateButtons.map((b) => [b]))
+      );
       return;
     }
 
+    editState.set(userId, { step: 'congregation' });
+    const buttons = ids.map((id) => {
+      const c = congRepo.getById(id);
+      return Markup.button.callback(c?.name ?? `Община ${id}`, `edit:cong:${id}`);
+    });
+    await ctx.reply('Выберите общину:', Markup.inlineKeyboard(buttons.map((b) => [b])));
+  });
+
+  bot.action(/^edit:cong:(\d+)$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const congregationId = parseInt(ctx.match[1], 10);
+    if (!ctx.congregationIds?.includes(congregationId)) {
+      await ctx.answerCbQuery('Нет доступа к этой общине.');
+      return;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const list = talks.listByCongregation(congregationId, { fromDate: today });
+    const dates = [...new Set(list.map((t) => t.date))].sort();
+    if (dates.length === 0) {
+      await ctx.editMessageText('В этой общине нет предстоящих речей для редактирования.');
+      editState.delete(userId);
+      return;
+    }
+    editState.set(userId, { step: 'date', congregationId });
+    const dateButtons = dates.map((d) => Markup.button.callback(d, `edit:date:${d}`));
+    await ctx.editMessageText('Выберите дату:', Markup.inlineKeyboard(dateButtons.map((b) => [b])));
+  });
+
+  bot.action(/^edit:date:(.+)$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const date = ctx.match[1];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    const state = editState.get(userId);
+    if (!state || state.step !== 'date' || state.congregationId === undefined) {
+      await ctx.answerCbQuery('Выберите общину и дату заново: /edit');
+      return;
+    }
+    const onDate = talks.listByCongregation(state.congregationId, { fromDate: date, toDate: date });
+    if (onDate.length === 0) {
+      await ctx.answerCbQuery('На эту дату речей не найдено.');
+      return;
+    }
+    const talkButtons = onDate.map((t, i) =>
+      Markup.button.callback(
+        `${i + 1}. Песня ${t.song_number === 0 ? '?' : t.song_number}, №${t.talk_number} — ${t.speaker_name}`,
+        `edit:talk:${t.id}`
+      )
+    );
+    await ctx.editMessageText(
+      `Речи на ${date}. Выберите речь:`,
+      Markup.inlineKeyboard(talkButtons.map((b) => [b]))
+    );
+  });
+
+  bot.action(/^edit:talk:(\d+)$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const talkId = parseInt(ctx.match[1], 10);
     const talk = talks.getById(talkId);
-    if (!talk) {
-      await ctx.reply('Речь с таким ID не найдена.');
+    if (!talk || !ctx.congregationIds?.includes(talk.congregation_id)) {
+      await ctx.answerCbQuery('Нет доступа к этой речи.');
       return;
     }
-    if (!ids.includes(talk.congregation_id)) {
-      await ctx.reply('Нет доступа к этой речи.');
-      return;
-    }
-
     editState.set(userId, { step: 'field', talkId });
     const cong = congRepo.getById(talk.congregation_id);
-    await ctx.reply(
-      `Редактирование речи #${talkId} (${cong?.name ?? ''}):\n` +
+    await ctx.editMessageText(
+      `Редактирование речи (${cong?.name ?? ''}):\n` +
         `Дата: ${talk.date}\n` +
         `Песня: ${talk.song_number === 0 ? '?' : talk.song_number}, Речь: №${talk.talk_number}\n` +
         `Название: ${talk.title}\n` +
@@ -68,7 +140,6 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
           Markup.button.callback('№ речи', 'edit:field:talk_number'),
         ],
         [
-          Markup.button.callback('Название', 'edit:field:title'),
           Markup.button.callback('Докладчик', 'edit:field:speaker_name'),
           Markup.button.callback('Телефон', 'edit:field:speaker_phone'),
         ],
@@ -79,8 +150,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
   const fieldPrompts: Record<string, string> = {
     date: 'Введите новую дату (ГГГГ-ММ-ДД):',
     song: 'Введите новый номер песни (1–200 или ? если ещё не известна):',
-    talk_number: 'Введите новый номер речи:',
-    title: 'Введите новое название речи:',
+    talk_number: 'Введите новый номер речи (название подставится из списка):',
     speaker_name: 'Введите новое имя докладчика:',
     speaker_phone: 'Введите новый номер телефона:',
   };
@@ -89,9 +159,9 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     const userId = ctx.from?.id;
     if (!userId) return;
     const field = ctx.match[1];
-    if (!['date', 'song', 'talk_number', 'title', 'speaker_name', 'speaker_phone'].includes(field)) return;
+    if (!['date', 'song', 'talk_number', 'speaker_name', 'speaker_phone'].includes(field)) return;
     const state = editState.get(userId);
-    if (!state || state.step !== 'field') return;
+    if (!state || state.step !== 'field' || state.talkId === undefined) return;
     const talk = talks.getById(state.talkId);
     if (!talk || !ctx.congregationIds?.includes(talk.congregation_id)) {
       await ctx.answerCbQuery('Нет доступа.');
@@ -119,6 +189,11 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       return next();
     }
 
+    if (state.step !== 'field' || state.talkId === undefined) {
+      await ctx.reply('Сначала выберите речь: /edit');
+      return next();
+    }
+
     const talk = talks.getById(state.talkId);
     if (!talk) {
       editState.delete(userId);
@@ -128,7 +203,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
 
     if (state.step === 'field') {
       const field = text.toLowerCase();
-      if (['date', 'song', 'talk_number', 'title', 'speaker_name', 'speaker_phone'].includes(field)) {
+      if (['date', 'song', 'talk_number', 'speaker_name', 'speaker_phone'].includes(field)) {
         state.step = field as EditStep;
         editState.set(userId, state);
         await ctx.reply(fieldPrompts[field] ?? 'Введите новое значение:');
@@ -168,13 +243,15 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     const update: Partial<TalkInput> = {};
     if (state.step === 'date') update.date = text;
     else if (state.step === 'song') update.song_number = value as number;
-    else if (state.step === 'talk_number') update.talk_number = value as number;
-    else if (state.step === 'title') update.title = text;
-    else if (state.step === 'speaker_name') update.speaker_name = text;
+    else if (state.step === 'talk_number') {
+      update.talk_number = value as number;
+      const newTitle = getTitleForTalk(db, value as number);
+      if (newTitle) update.title = newTitle;
+    } else if (state.step === 'speaker_name') update.speaker_name = text;
     else if (state.step === 'speaker_phone') update.speaker_phone = text;
 
     talks.update(state.talkId, update);
     editState.delete(userId);
-    await ctx.reply(`✅ Речь #${state.talkId} обновлена.`);
+    await ctx.reply(`✅ Речь обновлена.`);
   });
 }
