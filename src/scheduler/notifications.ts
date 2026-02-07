@@ -44,10 +44,11 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
       const cong = congRepo.getById(talk.congregation_id);
       const name = cong?.name ?? 'Община';
       const userIds = getUserIdsForCongregation(db, talk.congregation_id);
+      const songDisplay = talk.song_number === 0 ? '?' : talk.song_number;
       const text =
         `📅 Напоминание (через 7 дней)\n\n` +
         `Дата: ${talk.date}\n` +
-        `Песня ${talk.song_number}, Речь №${talk.talk_number}\n` +
+        `Песня ${songDisplay}, Речь №${talk.talk_number}\n` +
         `«${talk.title}»\n` +
         `Докладчик: ${talk.speaker_name}, тел. ${talk.speaker_phone}\n` +
         `Община: ${name}\n\n` +
@@ -69,10 +70,11 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
       const cong = congRepo.getById(talk.congregation_id);
       const name = cong?.name ?? 'Община';
       const userIds = getUserIdsForCongregation(db, talk.congregation_id);
+      const songDisplay = talk.song_number === 0 ? '?' : talk.song_number;
       const text =
         `⏰ Напоминание: завтра речь\n\n` +
         `Дата: ${talk.date}\n` +
-        `Песня ${talk.song_number}, Речь №${talk.talk_number}\n` +
+        `Песня ${songDisplay}, Речь №${talk.talk_number}\n` +
         `«${talk.title}»\n` +
         `Докладчик: ${talk.speaker_name}, тел. ${talk.speaker_phone}\n` +
         `Община: ${name}`;

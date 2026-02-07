@@ -57,7 +57,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     await ctx.reply(
       `Редактирование речи #${talkId} (${cong?.name ?? ''}):\n` +
         `Дата: ${talk.date}\n` +
-        `Песня: ${talk.song_number}, Речь: №${talk.talk_number}\n` +
+        `Песня: ${talk.song_number === 0 ? '?' : talk.song_number}, Речь: №${talk.talk_number}\n` +
         `Название: ${talk.title}\n` +
         `Докладчик: ${talk.speaker_name}, ${talk.speaker_phone}\n\n` +
         'Что изменить? (или /cancel)',
@@ -78,7 +78,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
 
   const fieldPrompts: Record<string, string> = {
     date: 'Введите новую дату (ГГГГ-ММ-ДД):',
-    song: 'Введите новый номер песни:',
+    song: 'Введите новый номер песни (1–200 или ? если ещё не известна):',
     talk_number: 'Введите новый номер речи:',
     title: 'Введите новое название речи:',
     speaker_name: 'Введите новое имя докладчика:',
@@ -145,12 +145,17 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
         return;
       }
     } else if (state.step === 'song') {
-      const n = parseInt(text, 10);
-      if (isNaN(n) || n < 1) {
-        await ctx.reply('Введите число (номер песни):');
-        return;
+      const trimmed = text.trim();
+      if (trimmed === '?' || trimmed === '？') {
+        value = 0;
+      } else {
+        const n = parseInt(text, 10);
+        if (isNaN(n) || n < 1 || n > 200) {
+          await ctx.reply('Введите число от 1 до 200 (номер песни) или ? если ещё не известна:');
+          return;
+        }
+        value = n;
       }
-      value = n;
     } else if (state.step === 'talk_number') {
       const n = parseInt(text, 10);
       if (isNaN(n) || n < 1) {

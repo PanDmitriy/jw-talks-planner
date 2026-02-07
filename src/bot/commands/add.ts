@@ -110,18 +110,23 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       state.step = 'song';
       state.date = text;
       wizardState.set(userId, state);
-      await ctx.reply('Шаг 2 из 7. Введите номер песни (1–200):');
+      await ctx.reply('Шаг 2 из 7. Введите номер песни (1–200) или ? если песня ещё не известна:');
       return;
     }
 
     if (state.step === 'song') {
-      const n = parseInt(text, 10);
-      if (isNaN(n) || n < 1 || n > 200) {
-        await ctx.reply('Введите число от 1 до 200 (номер песни):');
-        return;
+      const trimmed = text.trim();
+      if (trimmed === '?' || trimmed === '？') {
+        state.song_number = 0;
+      } else {
+        const n = parseInt(text, 10);
+        if (isNaN(n) || n < 1 || n > 200) {
+          await ctx.reply('Введите число от 1 до 200 (номер песни) или ? если ещё не известна:');
+          return;
+        }
+        state.song_number = n;
       }
       state.step = 'talk_number';
-      state.song_number = n;
       wizardState.set(userId, state);
       await ctx.reply('Шаг 3 из 7. Введите номер речи из списка (/plans):');
       return;
@@ -190,9 +195,10 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       };
       const id = talks.create(input);
       const cong = congRepo.getById(state.congregationId);
+      const songDisplay = state.song_number === 0 ? '?' : state.song_number;
       await ctx.reply(
         `✅ Речь добавлена (ID: ${id}).\n` +
-          `${state.date}, песня ${state.song_number}, речь №${state.talk_number}\n` +
+          `${state.date}, песня ${songDisplay}, речь №${state.talk_number}\n` +
           `«${state.title}» — ${state.speaker_name}, ${state.speaker_phone}\n` +
           `Община: ${cong?.name ?? state.congregationId}\n\nПосмотреть список: /list`
       );

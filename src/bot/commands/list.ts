@@ -10,10 +10,14 @@ import { talksRepo, congregationsRepo } from '../../db';
 import type { Talk } from '../../db/types';
 import { splitMessage } from '../utils/splitMessage';
 
+function formatSong(n: number): string {
+  return n === 0 ? '?' : String(n);
+}
+
 function formatTalk(t: Talk, congregationName: string): string {
   return (
     `🆔 ${t.id}\n` +
-    `📅 ${t.date} • Песня ${t.song_number} • Речь №${t.talk_number}\n` +
+    `📅 ${t.date} • Песня ${formatSong(t.song_number)} • Речь №${t.talk_number}\n` +
     `📖 ${t.title}\n` +
     `👤 ${t.speaker_name} • ${t.speaker_phone}\n` +
     `Община: ${congregationName}`
