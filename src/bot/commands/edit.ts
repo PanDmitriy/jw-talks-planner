@@ -189,7 +189,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       return next();
     }
 
-    if (state.step !== 'field' || state.talkId === undefined) {
+    if (state.talkId === undefined) {
       await ctx.reply('Сначала выберите речь: /edit');
       return next();
     }
