@@ -61,6 +61,14 @@ export interface TalkPlan {
   created_at: string;
 }
 
+/** Элемент общего списка названий речей по умолчанию (редактируемый) */
+export interface DefaultTalkTitle {
+  talk_number: number;
+  title: string;
+  updated_at: string;
+}
+
+
 /** Топ докладчиков */
 export interface SpeakerStats {
   speaker_name: string;

@@ -6,7 +6,7 @@ import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
-import { talksRepo, congregationsRepo, talkPlansRepo } from '../../db';
+import { talksRepo, congregationsRepo, getTitleForTalk } from '../../db';
 import type { TalkInput } from '../../db/types';
 
 type AddStep =
@@ -40,7 +40,6 @@ function isValidDate(s: string): boolean {
 export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   const talks = talksRepo(db);
   const congRepo = congregationsRepo(db);
-  const plansRepo = talkPlansRepo(db);
 
   const addHandler = async (ctx: AuthContext) => {
     const userId = ctx.from?.id;
@@ -136,12 +135,12 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       }
       state.talk_number = n;
       const congregationId = state.congregationId!;
-      const plan = plansRepo.getByNumber(congregationId, n);
-      if (plan) {
-        state.title = plan.title;
+      const title = getTitleForTalk(db, n);
+      if (title) {
+        state.title = title;
         state.step = 'speaker_name';
         wizardState.set(userId, state);
-        await ctx.reply(`Шаг 4 из 7. Название из списка: «${plan.title}».\nШаг 5 из 7. Введите имя докладчика:`);
+        await ctx.reply(`Шаг 4 из 7. Название из списка: «${title}».\nШаг 5 из 7. Введите имя докладчика:`);
         return;
       }
       state.step = 'title';

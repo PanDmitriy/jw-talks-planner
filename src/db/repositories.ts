@@ -3,7 +3,16 @@
  */
 
 import type { DatabaseInstance } from './schema';
-import type { Talk, TalkInput, Congregation, UserCongregation, TalkPlan, TalkStats, SpeakerStats } from './types';
+import type {
+  Talk,
+  TalkInput,
+  Congregation,
+  UserCongregation,
+  TalkPlan,
+  TalkStats,
+  SpeakerStats,
+  DefaultTalkTitle,
+} from './types';
 
 // --- Общины ---
 
@@ -29,7 +38,29 @@ export function congregationsRepo(db: DatabaseInstance) {
   };
 }
 
-// --- План речей (номер + название по общине) ---
+// --- Общий список названий речей по умолчанию (для всех общин, редактируемый) ---
+
+export function defaultTalkTitlesRepo(db: DatabaseInstance) {
+  return {
+    listAll(): DefaultTalkTitle[] {
+      return db
+        .prepare('SELECT talk_number, title, updated_at FROM default_talk_titles ORDER BY talk_number')
+        .all() as DefaultTalkTitle[];
+    },
+    getByNumber(talkNumber: number): DefaultTalkTitle | undefined {
+      return db
+        .prepare('SELECT talk_number, title, updated_at FROM default_talk_titles WHERE talk_number = ?')
+        .get(talkNumber) as DefaultTalkTitle | undefined;
+    },
+    updateTitle(talkNumber: number, title: string): void {
+      db.prepare(
+        "UPDATE default_talk_titles SET title = ?, updated_at = datetime('now') WHERE talk_number = ?"
+      ).run(title, talkNumber);
+    },
+  };
+}
+
+// --- План речей (номер + название по общине; переопределения над общим списком) ---
 
 export function talkPlansRepo(db: DatabaseInstance) {
   return {
@@ -66,6 +97,12 @@ export function talkPlansRepo(db: DatabaseInstance) {
       );
     },
   };
+}
+
+/** Название речи по номеру из общего списка (для всех общин). */
+export function getTitleForTalk(db: DatabaseInstance, talkNumber: number): string | undefined {
+  const def = defaultTalkTitlesRepo(db).getByNumber(talkNumber);
+  return def?.title;
 }
 
 // --- Доступ пользователей к общинам ---

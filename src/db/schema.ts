@@ -5,6 +5,7 @@
 import Database from 'better-sqlite3';
 import * as path from 'path';
 import * as fs from 'fs';
+import { DEFAULT_TALK_TITLES } from './defaultTalkTitles';
 
 /** Тип экземпляра БД (better-sqlite3 экспортирует конструктор) */
 export type DatabaseInstance = InstanceType<typeof Database>;
@@ -16,6 +17,22 @@ export function initDatabase(dbPath: string): DatabaseInstance {
   }
 
   const db = new Database(dbPath);
+
+  // Общий список названий речей по умолчанию (доступен всем, можно редактировать)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS default_talk_titles (
+      talk_number INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+  const countDefault = db.prepare('SELECT COUNT(*) as c FROM default_talk_titles').get() as { c: number };
+  if (countDefault.c === 0) {
+    const insert = db.prepare('INSERT INTO default_talk_titles (talk_number, title) VALUES (?, ?)');
+    for (const { number: talk_number, title } of DEFAULT_TALK_TITLES) {
+      insert.run(talk_number, title);
+    }
+  }
 
   // Общины
   db.exec(`
