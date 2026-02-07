@@ -12,6 +12,7 @@ export type {
   TalkStats,
   SpeakerStats,
   DefaultTalkTitle,
+  TalkYearMatrixRow,
 } from './types';
 export type { DatabaseInstance } from './schema';
 export {
@@ -23,5 +24,6 @@ export {
   notificationsRepo,
   getTalkStats,
   getSpeakerStats,
+  getTalkStatsByYearMatrix,
   getTitleForTalk,
 } from './repositories';

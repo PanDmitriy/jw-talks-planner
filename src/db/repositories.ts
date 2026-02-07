@@ -12,6 +12,7 @@ import type {
   TalkStats,
   SpeakerStats,
   DefaultTalkTitle,
+  TalkYearMatrixRow,
 } from './types';
 
 // --- Общины ---
@@ -276,6 +277,66 @@ export function getSpeakerStats(db: DatabaseInstance, congregationId: number): S
   `
     )
     .all(congregationId, today) as SpeakerStats[];
+}
+
+/** Формат даты для ячейки матрицы: Д.ММ или ДД.ММ */
+function formatDateForMatrix(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const month = String(m).padStart(2, '0');
+  return `${d}.${month}`;
+}
+
+/**
+ * Матрица «речь × год» для учёта по бланку: по каждой речи (1–194) — в каком году когда звучала (дата ДД.ММ).
+ * Только прошедшие речи (date <= сегодня).
+ */
+export function getTalkStatsByYearMatrix(
+  db: DatabaseInstance,
+  congregationId: number,
+  options?: { fromYear?: number; toYear?: number }
+): TalkYearMatrixRow[] {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = db
+    .prepare(
+      `SELECT talk_number, date FROM talks WHERE congregation_id = ? AND date <= ? ORDER BY talk_number, date`
+    )
+    .all(congregationId, today) as { talk_number: number; date: string }[];
+
+  const titles = defaultTalkTitlesRepo(db).listAll();
+  const fromYear = options?.fromYear ?? 2020;
+  const toYear = options?.toYear ?? new Date().getFullYear() + 1;
+
+  const byTalk: Map<number, Map<number, string[]>> = new Map();
+  for (const t of titles) {
+    byTalk.set(t.talk_number, new Map());
+  }
+  for (const r of rows) {
+    const year = parseInt(r.date.slice(0, 4), 10);
+    if (year < fromYear || year > toYear) continue;
+    const formatted = formatDateForMatrix(r.date);
+    let yearMap = byTalk.get(r.talk_number);
+    if (!yearMap) {
+      yearMap = new Map();
+      byTalk.set(r.talk_number, yearMap);
+    }
+    const arr = yearMap.get(year) ?? [];
+    arr.push(formatted);
+    yearMap.set(year, arr);
+  }
+
+  return titles.map((t) => {
+    const yearMap = byTalk.get(t.talk_number) ?? new Map();
+    const datesByYear: Record<number, string> = {};
+    for (let y = fromYear; y <= toYear; y++) {
+      const dates = yearMap.get(y);
+      if (dates?.length) datesByYear[y] = dates.join(', ');
+    }
+    return {
+      talk_number: t.talk_number,
+      title: t.title,
+      datesByYear,
+    };
+  });
 }
 
 // --- Уведомления (чтобы не слать дважды) ---

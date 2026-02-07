@@ -6,7 +6,7 @@ import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
-import { getTalkStats, getSpeakerStats, congregationsRepo } from '../../db';
+import { getTalkStats, getSpeakerStats, getTalkStatsByYearMatrix, congregationsRepo } from '../../db';
 import { splitMessage } from '../utils/splitMessage';
 
 export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
@@ -52,6 +52,38 @@ export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     }
     await sendStatsForCongregation(ctx, db, congregationId, true);
   });
+
+  bot.action(/^stats:matrix:(\d+)$/, async (ctx) => {
+    const congregationId = parseInt(ctx.match[1], 10);
+    if (!ctx.congregationIds?.includes(congregationId)) {
+      await ctx.answerCbQuery('Нет доступа.');
+      return;
+    }
+    await ctx.answerCbQuery();
+    const cong = congregationsRepo(db).getById(congregationId);
+    const name = cong?.name ?? `Община ${congregationId}`;
+    const matrix = getTalkStatsByYearMatrix(db, congregationId, { fromYear: 2020, toYear: 2028 });
+    const years = [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028];
+    const header = ['№', 'Название', ...years.map(String)].join(';');
+    const escapeCsv = (s: string) => (s.includes(';') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s);
+    const lines = [header];
+    for (const row of matrix) {
+      const cells = [
+        String(row.talk_number),
+        escapeCsv(row.title),
+        ...years.map((y) => row.datesByYear[y] ?? ''),
+      ];
+      lines.push(cells.join(';'));
+    }
+    const csv = '\uFEFF' + lines.join('\n');
+    const fileName = `stats-${name.replace(/\s+/g, '-')}-по-годам.csv`;
+    await ctx.telegram.sendDocument(ctx.chat!.id, {
+      source: Buffer.from(csv, 'utf8'),
+      filename: fileName,
+    }, {
+      caption: `📅 Учёт по годам — ${name}. Даты в формате ДД.ММ.`,
+    });
+  });
 }
 
 async function sendStatsForCongregation(
@@ -89,14 +121,18 @@ async function sendStatsForCongregation(
     });
   }
 
+  const matrixButton = Markup.button.callback('📅 По годам (матрица CSV)', `stats:matrix:${congregationId}`);
+
   const chunks = splitMessage(msg);
+  const keyboard = Markup.inlineKeyboard([matrixButton]);
   if (isEdit && 'editMessageText' in ctx && typeof ctx.editMessageText === 'function') {
-    await ctx.editMessageText(chunks[0]);
+    await ctx.editMessageText(chunks[0], keyboard);
     const chatId = ctx.chat?.id;
     if (chatId && chunks.length > 1) {
       for (const chunk of chunks.slice(1)) await ctx.telegram.sendMessage(chatId, chunk);
     }
   } else {
-    for (const chunk of chunks) await ctx.reply(chunk);
+    await ctx.reply(chunks[0], keyboard);
+    for (const chunk of chunks.slice(1)) await ctx.reply(chunk);
   }
 }

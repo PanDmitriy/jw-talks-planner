@@ -75,3 +75,11 @@ export interface SpeakerStats {
   speaker_phone: string;
   total_talks: number;
 }
+
+/** Строка матрицы «речь × год»: для каждой речи — даты выступлений по годам (формат ДД.ММ) */
+export interface TalkYearMatrixRow {
+  talk_number: number;
+  title: string;
+  /** Год → даты через запятую, напр. "30.06" или "30.06, 15.09" */
+  datesByYear: Record<number, string>;
+}
