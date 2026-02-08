@@ -10,23 +10,23 @@ import { applyPendingGrants } from '../middlewares/auth';
 import { userCongregationsRepo, congregationsRepo } from '../../db';
 
 const HELP_TEXT = `
-📋 *Команды бота*
+📋 Команды бота
 
-*Расписание и речи*
+Расписание и речи
 /list — расписание предстоящих речей
 /add — добавить речь
 /edit — изменить речь (выбор по дате)
 /delete — удалить речь (выбор по дате)
 
-*Список речей* (номера и названия для подстановки при добавлении речи)
+Список речей (номера и названия для подстановки при добавлении речи)
 /plans — просмотр
 
-*Община*
+Община
 /stats — статистика по речам и докладчикам
 /rename_congregation — переименовать общину
 
-*Админ*
-/grant @username [община] — выдать доступ
+Админ
+/grant @username (община) — выдать доступ
 
 /cancel — отмена пошаговой операции
 /help — эта справка
@@ -64,14 +64,11 @@ export function registerStartCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     const names = ids.map((id) => congRepo.getById(id)?.name).filter(Boolean).join(', ');
     await ctx.reply(
       `Добро пожаловать! У вас есть доступ к общинам: ${names}.\n\n${HELP_TEXT}`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.keyboard(QUICK_ACTIONS_KEYBOARD as unknown as string[][]).resize(),
-      }
+      Markup.keyboard(QUICK_ACTIONS_KEYBOARD as unknown as string[][]).resize()
     );
   });
 
   bot.command('help', async (ctx) => {
-    await ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' });
+    await ctx.reply(HELP_TEXT);
   });
 }
