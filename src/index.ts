@@ -52,7 +52,7 @@ const schedulerTimer = startScheduler(bot, db, schedulerInterval);
 const BOT_COMMANDS = [
   { command: 'start', description: 'Приветствие и справка' },
   { command: 'help', description: 'Справка по командам' },
-  { command: 'list', description: 'Список публичных речей' },
+  { command: 'list', description: 'Расписание публичных речей' },
   { command: 'add', description: 'Добавить речь' },
   { command: 'edit', description: 'Редактировать речь' },
   { command: 'delete', description: 'Удалить речь' },

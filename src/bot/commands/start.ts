@@ -12,7 +12,7 @@ import { userCongregationsRepo, congregationsRepo } from '../../db';
 const HELP_TEXT = `
 📋 *Команды бота*
 
-*Речи:* /list — предстоящие, /add — добавить, /edit <id>, /delete <id>
+*Речи:* /list — расписание, /add — добавить, /edit, /delete
 *Список речей:* /plans — просмотр, /add_plan, /edit_plan, /delete_plan
 *Общины:* /stats — статистика, /rename_congregation — переименовать общину
 *Админ:* /grant @username [община] — выдать доступ
@@ -22,7 +22,7 @@ const HELP_TEXT = `
 
 /** Reply-клавиатура быстрых действий (показывается после /start) */
 export const QUICK_ACTIONS_KEYBOARD = [
-  ['📋 Список речей', '➕ Добавить'],
+  ['📅 Расписание', '➕ Добавить'],
   ['📊 Статистика'],
 ] as const;
 

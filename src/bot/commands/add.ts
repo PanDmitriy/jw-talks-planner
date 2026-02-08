@@ -200,7 +200,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
         `✅ Речь добавлена (ID: ${id}).\n` +
           `${state.date}, песня ${songDisplay}, речь №${state.talk_number}\n` +
           `«${state.title}» — ${state.speaker_name}, ${state.speaker_phone}\n` +
-          `Община: ${cong?.name ?? state.congregationId}\n\nПосмотреть список: /list`
+          `Община: ${cong?.name ?? state.congregationId}\n\nПосмотреть расписание: /list`
       );
       return;
     }

@@ -1,5 +1,6 @@
 /**
- * Команда /list — просмотр списка публичных речей по общине
+ * Команда /list — расписание публичных речей по общине.
+ * На каждую дату одна речь (собрание по воскресеньям или по субботам).
  */
 
 import type { Telegraf } from 'telegraf';
@@ -10,18 +11,32 @@ import { talksRepo, congregationsRepo } from '../../db';
 import type { Talk } from '../../db/types';
 import { splitMessage } from '../utils/splitMessage';
 
+const DAY_NAMES = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
+const MONTH_NAMES = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+
 function formatSong(n: number): string {
   return n === 0 ? '?' : String(n);
 }
 
-function formatTalk(t: Talk, congregationName: string): string {
-  return (
-    `🆔 ${t.id}\n` +
-    `📅 ${t.date} • Песня ${formatSong(t.song_number)} • Речь №${t.talk_number}\n` +
-    `📖 ${t.title}\n` +
-    `👤 ${t.speaker_name} • ${t.speaker_phone}\n` +
-    `Община: ${congregationName}`
-  );
+/** Форматирует дату YYYY-MM-DD как "Суббота, 10 февраля 2025" */
+function formatDateHeader(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const dayName = DAY_NAMES[date.getDay()];
+  const month = MONTH_NAMES[m - 1];
+  return `${dayName}, ${d} ${month} ${y}`;
+}
+
+/** Одна строка расписания: дата (день недели) — песня, № речи, название, докладчик. На каждую дату одна речь. */
+function formatScheduleLine(t: Talk): string {
+  const song = formatSong(t.song_number);
+  return `📅 ${formatDateHeader(t.date)} — ${song} • №${t.talk_number} «${t.title}» — ${t.speaker_name}`;
+}
+
+/** Собирает текст расписания: одна строка на дату (список уже отсортирован по date). */
+function buildScheduleText(talks: Talk[]): string {
+  if (talks.length === 0) return '';
+  return talks.map(formatScheduleLine).join('\n');
 }
 
 export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
@@ -42,8 +57,8 @@ export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
         await ctx.reply(`В общине «${name}» пока ничего нет. Добавить: /add`);
         return;
       }
-      const text = list.map((t) => formatTalk(t, name)).join('\n\n---\n\n');
-      const fullText = `📋 Предстоящие речи — ${name}\n\n${text}`;
+      const scheduleText = buildScheduleText(list);
+      const fullText = `📅 Расписание публичных речей — ${name}\n\n${scheduleText}`;
       const chunks = splitMessage(fullText);
       for (const chunk of chunks) await ctx.reply(chunk);
       return;
@@ -58,7 +73,7 @@ export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
   };
 
   bot.command('list', listHandler);
-  bot.hears('📋 Список речей', listHandler);
+  bot.hears('📅 Расписание', listHandler);
 
   bot.action(/^list:cong:(\d+)$/, async (ctx) => {
     const congregationId = parseInt(ctx.match[1], 10);
@@ -74,8 +89,8 @@ export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       await ctx.editMessageText(`В общине «${name}» пока ничего нет. Добавить: /add`);
       return;
     }
-    const text = list.map((t) => formatTalk(t, name)).join('\n\n---\n\n');
-    const fullText = `📋 Предстоящие речи — ${name}\n\n${text}`;
+    const scheduleText = buildScheduleText(list);
+    const fullText = `📅 Расписание публичных речей — ${name}\n\n${scheduleText}`;
     const chunks = splitMessage(fullText);
     await ctx.editMessageText(chunks[0]);
     const chatId = ctx.chat?.id;
