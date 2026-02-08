@@ -27,16 +27,22 @@ function formatDateHeader(isoDate: string): string {
   return `${dayName}, ${d} ${month} ${y}`;
 }
 
-/** Одна строка расписания: дата (день недели) — песня, № речи, название, докладчик. На каждую дату одна речь. */
-function formatScheduleLine(t: Talk): string {
+/** Блок одной даты: заголовок даты, затем песня/речь/название, докладчик. */
+function formatScheduleBlock(t: Talk): string {
   const song = formatSong(t.song_number);
-  return `📅 ${formatDateHeader(t.date)} — ${song} • №${t.talk_number} «${t.title}» — ${t.speaker_name}`;
+  return (
+    `🗓 ${formatDateHeader(t.date)}\n` +
+    `   🎵 ${song}  ·  №${t.talk_number} «${t.title}»\n` +
+    `   👤 ${t.speaker_name}`
+  );
 }
 
-/** Собирает текст расписания: одна строка на дату (список уже отсортирован по date). */
+/** Собирает текст расписания с визуальными блоками и разделителями. */
 function buildScheduleText(talks: Talk[]): string {
   if (talks.length === 0) return '';
-  return talks.map(formatScheduleLine).join('\n');
+  const sep = '─────────────────────';
+  const blocks = talks.map(formatScheduleBlock).join(`\n\n${sep}\n\n`);
+  return `${sep}\n\n${blocks}\n\n${sep}`;
 }
 
 export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
@@ -58,7 +64,7 @@ export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
         return;
       }
       const scheduleText = buildScheduleText(list);
-      const fullText = `📅 Расписание публичных речей — ${name}\n\n${scheduleText}`;
+      const fullText = `📅 Расписание — ${name}\n\n${scheduleText}`;
       const chunks = splitMessage(fullText);
       for (const chunk of chunks) await ctx.reply(chunk);
       return;
@@ -90,7 +96,7 @@ export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       return;
     }
     const scheduleText = buildScheduleText(list);
-    const fullText = `📅 Расписание публичных речей — ${name}\n\n${scheduleText}`;
+    const fullText = `📅 Расписание — ${name}\n\n${scheduleText}`;
     const chunks = splitMessage(fullText);
     await ctx.editMessageText(chunks[0]);
     const chatId = ctx.chat?.id;
