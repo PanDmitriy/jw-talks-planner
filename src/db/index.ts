@@ -15,6 +15,7 @@ export type {
   TalkYearMatrixRow,
 } from './types';
 export type { DatabaseInstance } from './schema';
+export type { MergedPlanItem } from './repositories';
 export {
   congregationsRepo,
   defaultTalkTitlesRepo,
@@ -26,4 +27,5 @@ export {
   getSpeakerStats,
   getTalkStatsByYearMatrix,
   getTitleForTalk,
+  getMergedPlansForCongregation,
 } from './repositories';

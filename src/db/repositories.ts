@@ -72,6 +72,19 @@ export function talkPlansRepo(db: DatabaseInstance) {
       const result = stmt.run(congregationId, talkNumber, title);
       return result.lastInsertRowid as number;
     },
+    /** Добавить или обновить название по номеру для общины. */
+    upsert(congregationId: number, talkNumber: number, title: string): void {
+      const existing = db
+        .prepare('SELECT id FROM talk_plans WHERE congregation_id = ? AND talk_number = ?')
+        .get(congregationId, talkNumber) as { id: number } | undefined;
+      if (existing) {
+        db.prepare('UPDATE talk_plans SET title = ? WHERE id = ?').run(title, existing.id);
+      } else {
+        db.prepare(
+          'INSERT INTO talk_plans (congregation_id, talk_number, title) VALUES (?, ?, ?)'
+        ).run(congregationId, talkNumber, title);
+      }
+    },
     getById(id: number): TalkPlan | undefined {
       return db.prepare('SELECT * FROM talk_plans WHERE id = ?').get(id) as TalkPlan | undefined;
     },
@@ -100,7 +113,33 @@ export function talkPlansRepo(db: DatabaseInstance) {
   };
 }
 
-/** Название речи по номеру из общего списка (для всех общин). */
+/** Элемент объединённого списка речей по общине (номер + название, возможно из переопределения). */
+export interface MergedPlanItem {
+  talk_number: number;
+  title: string;
+  /** id в talk_plans, если это переопределение общины */
+  planId?: number;
+}
+
+/** Объединённый список: default_talk_titles с переопределениями из talk_plans для общины. */
+export function getMergedPlansForCongregation(
+  db: DatabaseInstance,
+  congregationId: number
+): MergedPlanItem[] {
+  const defaultList = defaultTalkTitlesRepo(db).listAll();
+  const overrides = talkPlansRepo(db).listByCongregation(congregationId);
+  const overrideMap = new Map(overrides.map((p) => [p.talk_number, { title: p.title, id: p.id }]));
+  return defaultList.map((d) => {
+    const ov = overrideMap.get(d.talk_number);
+    return {
+      talk_number: d.talk_number,
+      title: ov?.title ?? d.title,
+      planId: ov?.id,
+    };
+  });
+}
+
+/** Название речи по номеру из списка по умолчанию (default_talk_titles). */
 export function getTitleForTalk(db: DatabaseInstance, talkNumber: number): string | undefined {
   const def = defaultTalkTitlesRepo(db).getByNumber(talkNumber);
   return def?.title;

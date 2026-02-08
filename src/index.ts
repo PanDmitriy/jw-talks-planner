@@ -58,9 +58,6 @@ const BOT_COMMANDS = [
   { command: 'delete', description: 'Удалить речь' },
   { command: 'stats', description: 'Статистика по речам' },
   { command: 'plans', description: 'Список речей (номер + название)' },
-  { command: 'add_plan', description: 'Добавить в список речей' },
-  { command: 'edit_plan', description: 'Редактировать список речей' },
-  { command: 'delete_plan', description: 'Удалить из списка речей' },
   { command: 'rename_congregation', description: 'Переименовать общину' },
   { command: 'grant', description: 'Выдать доступ (админ)' },
 ];
