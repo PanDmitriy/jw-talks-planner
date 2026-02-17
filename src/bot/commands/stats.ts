@@ -1,12 +1,12 @@
 /**
- * Команда /stats — статистика: сколько раз каждая речь звучала, когда в последний раз, кто выступал чаще всего
+ * Команда /stats — статистика: сколько раз каждая речь звучала и когда в последний раз
  */
 
 import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
-import { getTalkStats, getSpeakerStats, getTalkStatsByYearMatrix, congregationsRepo } from '../../db';
+import { getTalkStats, getTalkStatsByYearMatrix, congregationsRepo } from '../../db';
 import { splitMessage } from '../utils/splitMessage';
 
 export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
@@ -20,7 +20,7 @@ export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     const args = text.split(/\s+/).slice(1);
     const congregationName = args.join(' ').trim();
 
-    if (ids.length === 1 && !congregationName) {
+    if (ids.length === 1) {
       await sendStatsForCongregation(ctx, db, ids[0]);
       return;
     }
@@ -93,33 +93,33 @@ async function sendStatsForCongregation(
   congregationId: number,
   isEdit = false
 ): Promise<void> {
+  const escapeHtml = (value: string): string =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
   const cong = await congregationsRepo(db).getById(congregationId);
   const name = cong?.name ?? `Община ${congregationId}`;
+  const safeName = escapeHtml(name);
 
   const talkStats = await getTalkStats(db, congregationId);
-  const speakerStats = await getSpeakerStats(db, congregationId);
+  let msg = `📊 Статистика\n${safeName}\n\n`;
 
-  let msg = `📊 Статистика — ${name}\n\n`;
-  msg += 'По речам (сколько раз звучала, когда в последний раз):\n';
   if (talkStats.length === 0) {
-    msg += 'Нет данных о прошедших речах.\n\n';
+    msg += 'Речей в истории пока нет.\n';
   } else {
-    for (const t of talkStats) {
-      msg += `• Речь №${t.talk_number} «${t.title}» — ${t.total_count} раз`;
-      if (t.last_date) msg += `, последний раз: ${t.last_date}`;
-      if (t.last_speaker) msg += ` (${t.last_speaker})`;
-      msg += '\n';
-    }
-    msg += '\n';
-  }
+    msg += `Всего речей в истории: ${talkStats.length}\n`;
+    msg += 'Порядок: по номеру речи\n\n';
 
-  msg += 'Кто выступал чаще всего:\n';
-  if (speakerStats.length === 0) {
-    msg += 'Нет данных.\n';
-  } else {
-    speakerStats.slice(0, 15).forEach((s, i) => {
-      msg += `${i + 1}. ${s.speaker_name} (${s.speaker_phone}) — ${s.total_talks} речей\n`;
-    });
+    for (const t of talkStats) {
+      const countText = `${t.total_count} раз`;
+      const lastDateText = t.last_date ? `<b>${escapeHtml(t.last_date)}</b>` : '<b>нет даты</b>';
+      const speakerText = t.last_speaker ? escapeHtml(t.last_speaker) : 'не указан';
+      const titleText = escapeHtml(t.title);
+      msg += `• <b>№${t.talk_number}</b> · ${countText} · ${lastDateText} · ${speakerText}\n`;
+      msg += `  ${titleText}\n`;
+    }
   }
 
   const matrixButton = Markup.button.callback('📅 По годам (матрица CSV)', `stats:matrix:${congregationId}`);
@@ -127,13 +127,23 @@ async function sendStatsForCongregation(
   const chunks = splitMessage(msg);
   const keyboard = Markup.inlineKeyboard([matrixButton]);
   if (isEdit && 'editMessageText' in ctx && typeof ctx.editMessageText === 'function') {
-    await ctx.editMessageText(chunks[0], keyboard);
+    await ctx.editMessageText(chunks[0], {
+      ...keyboard,
+      parse_mode: 'HTML',
+    });
     const chatId = ctx.chat?.id;
     if (chatId && chunks.length > 1) {
-      for (const chunk of chunks.slice(1)) await ctx.telegram.sendMessage(chatId, chunk);
+      for (const chunk of chunks.slice(1)) {
+        await ctx.telegram.sendMessage(chatId, chunk, { parse_mode: 'HTML' });
+      }
     }
   } else {
-    await ctx.reply(chunks[0], keyboard);
-    for (const chunk of chunks.slice(1)) await ctx.reply(chunk);
+    await ctx.reply(chunks[0], {
+      ...keyboard,
+      parse_mode: 'HTML',
+    });
+    for (const chunk of chunks.slice(1)) {
+      await ctx.reply(chunk, { parse_mode: 'HTML' });
+    }
   }
 }
