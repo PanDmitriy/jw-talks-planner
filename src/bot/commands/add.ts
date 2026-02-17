@@ -8,6 +8,7 @@ import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
 import { talksRepo, congregationsRepo, getTitleForTalk } from '../../db';
 import type { TalkInput } from '../../db/types';
+import { formatDateRu, parseUserDateToYmd } from '../../utils/date';
 
 type AddStep =
   | 'congregation'
@@ -31,12 +32,6 @@ interface AddTalkState {
 
 const wizardState = new Map<number, AddTalkState>();
 
-/** Проверка даты ГГГГ-ММ-ДД */
-function isValidDate(s: string): boolean {
-  const d = new Date(s);
-  return !isNaN(d.getTime()) && s.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
 export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   const talks = talksRepo(db);
   const congRepo = congregationsRepo(db);
@@ -51,7 +46,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       wizardState.set(userId, { step: 'date', congregationId: ids[0] });
       const cong = await congRepo.getById(ids[0]);
       await ctx.reply(
-        `Шаг 1 из 7. Община: ${cong?.name ?? ids[0]}.\n\nВведите дату речи (ГГГГ-ММ-ДД), например 2025-02-10.\nОтмена: /cancel`
+        `Шаг 1 из 7. Община: ${cong?.name ?? ids[0]}.\n\nВведите дату речи (ДД.ММ.ГГГГ), например 10.02.2025.\nОтмена: /cancel`
       );
       return;
     }
@@ -77,7 +72,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
     wizardState.set(userId, { step: 'date', congregationId });
     const cong = await congRepo.getById(congregationId);
     await ctx.editMessageText(
-      `Шаг 1 из 7. Община: ${cong?.name ?? congregationId}.\n\nВведите дату речи (ГГГГ-ММ-ДД), например 2025-02-10.\nОтмена: /cancel`
+      `Шаг 1 из 7. Община: ${cong?.name ?? congregationId}.\n\nВведите дату речи (ДД.ММ.ГГГГ), например 10.02.2025.\nОтмена: /cancel`
     );
   });
 
@@ -103,12 +98,13 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
     }
 
     if (state.step === 'date') {
-      if (!isValidDate(text)) {
-        await ctx.reply('Неверный формат даты. Введите ГГГГ-ММ-ДД (например 2025-02-10) или /cancel.');
+      const ymd = parseUserDateToYmd(text);
+      if (!ymd) {
+        await ctx.reply('Неверный формат даты. Введите ДД.ММ.ГГГГ (например 10.02.2025) или /cancel.');
         return;
       }
       state.step = 'song';
-      state.date = text;
+      state.date = ymd;
       wizardState.set(userId, state);
       await ctx.reply('Шаг 2 из 7. Введите номер песни (1–200) или ? если песня ещё не известна:');
       return;
@@ -198,7 +194,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       const songDisplay = state.song_number === 0 ? '?' : state.song_number;
       await ctx.reply(
         `✅ Речь добавлена (ID: ${id}).\n` +
-          `${state.date}, песня ${songDisplay}, речь №${state.talk_number}\n` +
+          `${formatDateRu(state.date)}, песня ${songDisplay}, речь №${state.talk_number}\n` +
           `«${state.title}» — ${state.speaker_name}, ${state.speaker_phone}\n` +
           `Община: ${cong?.name ?? state.congregationId}\n\nПосмотреть расписание: /list`
       );

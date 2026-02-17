@@ -8,6 +8,7 @@ import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
 import { talksRepo, congregationsRepo, getTitleForTalk } from '../../db';
 import type { TalkInput } from '../../db/types';
+import { formatDateRu, parseUserDateToYmd } from '../../utils/date';
 
 type EditStep =
   | 'congregation'
@@ -29,11 +30,6 @@ interface EditTalkState {
 }
 
 const editState = new Map<number, EditTalkState>();
-
-function isValidDate(s: string): boolean {
-  const d = new Date(s);
-  return !isNaN(d.getTime()) && s.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
 
 function getDateStatusLabel(ymd: string): string {
   const today = new Date().toISOString().slice(0, 10);
@@ -74,7 +70,7 @@ function getEditFieldKeyboard() {
 function formatEditTalkCard(congregationName: string, talk: { date: string; song_number: number; talk_number: number; title: string; speaker_name: string; speaker_phone: string }): string {
   return (
     `Редактирование речи (${congregationName}):\n` +
-    `Дата: ${talk.date}\n` +
+    `Дата: ${formatDateRu(talk.date)}\n` +
     `Песня: ${talk.song_number === 0 ? '?' : talk.song_number}, Речь: №${talk.talk_number}\n` +
     `Название: ${talk.title}\n` +
     `Докладчик: ${talk.speaker_name}, ${talk.speaker_phone}\n\n` +
@@ -138,7 +134,10 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
 
     editState.set(userId, { step: 'date', congregationId: state.congregationId, period });
     const dateButtons = dates.map((d) =>
-      Markup.button.callback(`${d < new Date().toISOString().slice(0, 10) ? '🕓' : '📅'} ${d}`, `edit:date:${d}`)
+      Markup.button.callback(
+        `${d < new Date().toISOString().slice(0, 10) ? '🕓' : '📅'} ${formatDateRu(d)}`,
+        `edit:date:${d}`
+      )
     );
     await ctx.editMessageText(
       `Выберите дату (${getPeriodLabel(period)} речи):`,
@@ -172,7 +171,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       )
     );
     await ctx.editMessageText(
-      `${getDateStatusLabel(date)} речь на ${date}. Выберите речь:`,
+      `${getDateStatusLabel(date)} речь на ${formatDateRu(date)}. Выберите речь:`,
       Markup.inlineKeyboard(talkButtons.map((b) => [b]))
     );
   });
@@ -201,7 +200,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
   });
 
   const fieldPrompts: Record<string, string> = {
-    date: 'Введите новую дату (ГГГГ-ММ-ДД):',
+    date: 'Введите новую дату (ДД.ММ.ГГГГ):',
     song: 'Введите новый номер песни (1–200 или ? если ещё не известна):',
     talk_number: 'Введите новый номер речи (название подставится из списка):',
     speaker_name: 'Введите новое имя докладчика:',
@@ -284,9 +283,11 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     }
 
     let value: string | number = text;
+    let normalizedDate: string | null = null;
     if (state.step === 'date') {
-      if (!isValidDate(text)) {
-        await ctx.reply('Неверный формат даты. Введите ГГГГ-ММ-ДД:');
+      normalizedDate = parseUserDateToYmd(text);
+      if (!normalizedDate) {
+        await ctx.reply('Неверный формат даты. Введите ДД.ММ.ГГГГ:');
         return;
       }
     } else if (state.step === 'song') {
@@ -311,7 +312,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     }
 
     const update: Partial<TalkInput> = {};
-    if (state.step === 'date') update.date = text;
+    if (state.step === 'date') update.date = normalizedDate!;
     else if (state.step === 'song') update.song_number = value as number;
     else if (state.step === 'talk_number') {
       update.talk_number = value as number;

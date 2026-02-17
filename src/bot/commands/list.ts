@@ -10,33 +10,22 @@ import { Markup } from 'telegraf';
 import { talksRepo, congregationsRepo } from '../../db';
 import type { Talk } from '../../db/types';
 import { splitMessage } from '../utils/splitMessage';
+import { formatDateRu, toYmdString } from '../../utils/date';
 
 const DAY_NAMES = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
-const MONTH_NAMES = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 
 function formatSong(n: number): string {
   return n === 0 ? '?' : String(n);
 }
 
-function toYmdString(value: string | Date | number): string {
-  if (typeof value === 'string') {
-    // Поддерживаем как YYYY-MM-DD, так и ISO datetime.
-    return value.includes('T') ? value.split('T')[0] : value;
-  }
-  const date = value instanceof Date ? value : new Date(value);
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(date.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-/** Форматирует дату YYYY-MM-DD как "Суббота, 10 февраля 2025" */
+/** Форматирует дату как "Суббота, 10.02.2025" */
 function formatDateHeader(isoDate: string | Date | number): string {
-  const [y, m, d] = toYmdString(isoDate).split('-').map(Number);
+  const ymd = toYmdString(isoDate);
+  if (!ymd) return formatDateRu(isoDate);
+  const [y, m, d] = ymd.split('-').map(Number);
   const date = new Date(y, m - 1, d);
   const dayName = DAY_NAMES[date.getDay()];
-  const month = MONTH_NAMES[m - 1];
-  return `${dayName}, ${d} ${month} ${y}`;
+  return `${dayName}, ${formatDateRu(isoDate)}`;
 }
 
 /** Блок одной даты: заголовок даты, затем песня/речь/название, докладчик. */

@@ -7,6 +7,7 @@
 import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../db';
 import { talksRepo, congregationsRepo, notificationsRepo } from '../db';
+import { formatDateRu } from '../utils/date';
 
 const NOTIFY_7_DAYS = '7days';
 const NOTIFY_12_HOURS = '12hours';
@@ -48,7 +49,7 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
       const songDisplay = talk.song_number === 0 ? '?' : talk.song_number;
       const text =
         `📅 Напоминание (через 7 дней)\n\n` +
-        `Дата: ${talk.date}\n` +
+        `Дата: ${formatDateRu(talk.date)}\n` +
         `Песня ${songDisplay}, Речь №${talk.talk_number}\n` +
         `«${talk.title}»\n` +
         `Докладчик: ${talk.speaker_name}, тел. ${talk.speaker_phone}\n` +
@@ -74,7 +75,7 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
       const songDisplay = talk.song_number === 0 ? '?' : talk.song_number;
       const text =
         `⏰ Напоминание: завтра речь\n\n` +
-        `Дата: ${talk.date}\n` +
+        `Дата: ${formatDateRu(talk.date)}\n` +
         `Песня ${songDisplay}, Речь №${talk.talk_number}\n` +
         `«${talk.title}»\n` +
         `Докладчик: ${talk.speaker_name}, тел. ${talk.speaker_phone}\n` +

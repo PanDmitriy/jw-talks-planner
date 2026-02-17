@@ -7,29 +7,11 @@ import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
 import { talksRepo, congregationsRepo } from '../../db';
+import { formatDateRu, toYmdString } from '../../utils/date';
 
-const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-const MONTH_NAMES = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-
-/** Краткая подпись даты для кнопки: "10 фев (сб)" */
-function toYmdString(value: string | Date | number): string {
-  if (typeof value === 'string') {
-    return value.includes('T') ? value.split('T')[0] : value;
-  }
-  const date = value instanceof Date ? value : new Date(value);
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(date.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-/** Краткая подпись даты для кнопки: "10 фев (сб)" */
+/** Краткая подпись даты для кнопки: "10.02.2025" */
 function formatDateShort(isoDate: string | Date | number): string {
-  const [y, m, d] = toYmdString(isoDate).split('-').map(Number);
-  const date = new Date(y, m - 1, d);
-  const dayName = DAY_NAMES[date.getDay()];
-  const month = MONTH_NAMES[m - 1];
-  return `${d} ${month} (${dayName})`;
+  return formatDateRu(isoDate);
 }
 
 function getDateStatusLabel(ymd: string): string {

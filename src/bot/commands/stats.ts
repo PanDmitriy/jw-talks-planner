@@ -8,6 +8,7 @@ import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
 import { getTalkStats, getTalkStatsByYearMatrix, congregationsRepo } from '../../db';
 import { splitMessage } from '../utils/splitMessage';
+import { formatDateRu } from '../../utils/date';
 
 export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   const congRepo = congregationsRepo(db);
@@ -114,7 +115,7 @@ async function sendStatsForCongregation(
 
     for (const t of talkStats) {
       const countText = `${t.total_count} раз`;
-      const lastDateText = t.last_date ? `<b>${escapeHtml(t.last_date)}</b>` : '<b>нет даты</b>';
+      const lastDateText = t.last_date ? `<b>${escapeHtml(formatDateRu(t.last_date))}</b>` : '<b>нет даты</b>';
       const speakerText = t.last_speaker ? escapeHtml(t.last_speaker) : 'не указан';
       const titleText = escapeHtml(t.title);
       msg += `• <b>№${t.talk_number}</b> · ${countText} · ${lastDateText} · ${speakerText}\n`;
