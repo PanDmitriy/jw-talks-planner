@@ -33,7 +33,7 @@ export function requireAuth(db: DatabaseInstance) {
     if (text === '/start' || text.startsWith('/start ') || text === '/help' || text.startsWith('/grant')) {
       const userId = ctx.from?.id;
       if (userId && !text.startsWith('/grant')) {
-        const ids = userRepo.getCongregationIdsForUser(userId);
+        const ids = await userRepo.getCongregationIdsForUser(userId);
         ctx.congregationIds = ids;
       }
       return next();
@@ -43,7 +43,7 @@ export function requireAuth(db: DatabaseInstance) {
       await ctx.reply('Не удалось определить пользователя.');
       return;
     }
-    const ids = userRepo.getCongregationIdsForUser(userId);
+    const ids = await userRepo.getCongregationIdsForUser(userId);
     ctx.congregationIds = ids;
     if (ids.length === 0) {
       await ctx.reply(
@@ -90,13 +90,13 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
     const username = usernameRaw.startsWith('@') ? usernameRaw.slice(1) : usernameRaw;
     const congregationName = parts.slice(1).join(' ').trim();
 
-    const congregations = congRepo.listAll();
+    const congregations = await congRepo.listAll();
     let congregationId: number;
     if (congregationName) {
       let cong = congregations.find((c) => c.name.toLowerCase() === congregationName.toLowerCase());
       if (!cong) {
-        congregationId = congRepo.create(congregationName);
-        cong = congRepo.getById(congregationId);
+        congregationId = await congRepo.create(congregationName);
+        cong = await congRepo.getById(congregationId);
       } else {
         congregationId = cong.id;
       }
@@ -104,8 +104,8 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
       if (congregations.length === 0) {
         // Первый grant без названия — создаём общину по умолчанию
         const defaultName = process.env.DEFAULT_CONGREGATION_NAME || 'Община 1';
-        congregationId = congRepo.create(defaultName);
-        const cong = congRepo.getById(congregationId);
+        congregationId = await congRepo.create(defaultName);
+        const cong = await congRepo.getById(congregationId);
         getPendingGrants().add(username, congregationId);
         await ctx.reply(
           `Община «${cong?.name ?? defaultName}» создана автоматически. Доступ для @${username} будет выдан, когда пользователь напишет боту /start. Попросите его написать боту.`
@@ -138,8 +138,9 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
     // Если user_id = 0, то один раз можно. Или отдельная таблица pending_grants (username, congregation_id).
     // Сделаю проще: при /grant пишем "Попросите пользователя @username написать боту команду /start. После этого повторите /grant @username Община — тогда доступ будет привязан к аккаунту." И храним pending: username -> congregation_id. При /start смотрим username, если есть pending — добавляем user_congregations(user_id, username, congregation_id) и удаляем pending.
     getPendingGrants().add(username, congregationId);
+    const cong = await congRepo.getById(congregationId);
     await ctx.reply(
-      `Доступ для @${username} к общине «${congRepo.getById(congregationId)?.name}» будет выдан, когда пользователь напишет боту /start. Попросите его написать боту.`
+      `Доступ для @${username} к общине «${cong?.name}» будет выдан, когда пользователь напишет боту /start. Попросите его написать боту.`
     );
   });
 }
@@ -165,11 +166,11 @@ export function getPendingGrants() {
 /**
  * При /start проверяем, есть ли для этого username ожидающий grant — если да, выдаём доступ.
  */
-export function applyPendingGrants(db: DatabaseInstance, userId: number, username: string | null): void {
+export async function applyPendingGrants(db: DatabaseInstance, userId: number, username: string | null): Promise<void> {
   if (!username) return;
   const list = getPendingGrants().consume(username);
   const userRepo = userCongregationsRepo(db);
   for (const congregationId of list) {
-    userRepo.grant(userId, username, congregationId);
+    await userRepo.grant(userId, username, congregationId);
   }
 }

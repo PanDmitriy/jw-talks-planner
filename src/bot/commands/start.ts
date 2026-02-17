@@ -48,11 +48,11 @@ export function registerStartCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     }
 
     // Если администратор выдал доступ по username — привязываем к user_id
-    applyPendingGrants(db, userId, username);
+    await applyPendingGrants(db, userId, username);
 
     const userRepo = userCongregationsRepo(db);
     const congRepo = congregationsRepo(db);
-    const ids = userRepo.getCongregationIdsForUser(userId);
+    const ids = await userRepo.getCongregationIdsForUser(userId);
 
     if (ids.length === 0) {
       await ctx.reply(
@@ -61,7 +61,7 @@ export function registerStartCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
       return;
     }
 
-    const names = ids.map((id) => congRepo.getById(id)?.name).filter(Boolean).join(', ');
+    const names = (await Promise.all(ids.map((id) => congRepo.getById(id)))).map((c) => c?.name).filter(Boolean).join(', ');
     await ctx.reply(
       `Добро пожаловать! У вас есть доступ к общинам: ${names}.\n\n${HELP_TEXT}`,
       Markup.keyboard(QUICK_ACTIONS_KEYBOARD as unknown as string[][]).resize()

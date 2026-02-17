@@ -8,17 +8,17 @@
     "start": "node dist/index.js",
     "build": "tsc"
   },
-  "keywords": ["telegram", "bot", "telegraf", "sqlite", "jw"],
+  "keywords": ["telegram", "bot", "telegraf", "postgres", "jw"],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "better-sqlite3": "^11.6.0",
     "dotenv": "^16.4.5",
+    "pg": "^8.13.1",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.10.1",
+    "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

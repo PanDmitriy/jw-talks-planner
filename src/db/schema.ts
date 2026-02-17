@@ -1,100 +1,86 @@
 /**
- * Создание схемы базы данных SQLite
+ * Создание схемы базы данных PostgreSQL
  */
 
-import Database from 'better-sqlite3';
-import * as path from 'path';
-import * as fs from 'fs';
+import { Pool } from 'pg';
 import { DEFAULT_TALK_TITLES } from './defaultTalkTitles';
 
-/** Тип экземпляра БД (better-sqlite3 экспортирует конструктор) */
-export type DatabaseInstance = InstanceType<typeof Database>;
+export type DatabaseInstance = Pool;
 
-export function initDatabase(dbPath: string): DatabaseInstance {
-  const dir = path.dirname(dbPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+export async function initDatabase(connectionUrl: string): Promise<DatabaseInstance> {
+  const pool = new Pool({ connectionString: connectionUrl });
 
-  const db = new Database(dbPath);
-
-  // Общий список названий речей по умолчанию (доступен всем, можно редактировать)
-  db.exec(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS default_talk_titles (
       talk_number INTEGER PRIMARY KEY,
       title TEXT NOT NULL,
-      updated_at TEXT DEFAULT (datetime('now'))
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
-  const countDefault = db.prepare('SELECT COUNT(*) as c FROM default_talk_titles').get() as { c: number };
-  if (countDefault.c === 0) {
-    const insert = db.prepare('INSERT INTO default_talk_titles (talk_number, title) VALUES (?, ?)');
+
+  const countResult = await pool.query('SELECT COUNT(*) as c FROM default_talk_titles');
+  const count = parseInt(String(countResult.rows[0]?.c ?? 0), 10);
+  if (count === 0) {
     for (const { number: talk_number, title } of DEFAULT_TALK_TITLES) {
-      insert.run(talk_number, title);
+      await pool.query(
+        'INSERT INTO default_talk_titles (talk_number, title) VALUES ($1, $2)',
+        [talk_number, title]
+      );
     }
   }
 
-  // Общины
-  db.exec(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS congregations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
 
-  // Пользователи с доступом к общинам (user_id из Telegram)
-  db.exec(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS user_congregations (
-      user_id INTEGER NOT NULL,
+      user_id BIGINT NOT NULL,
       username TEXT,
-      congregation_id INTEGER NOT NULL,
-      granted_at TEXT DEFAULT (datetime('now')),
-      PRIMARY KEY (user_id, congregation_id),
-      FOREIGN KEY (congregation_id) REFERENCES congregations(id)
+      congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+      granted_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (user_id, congregation_id)
     );
   `);
 
-  // План речей по общине: номер и название (для подстановки при добавлении речи)
-  db.exec(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS talk_plans (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      congregation_id INTEGER NOT NULL,
+      id SERIAL PRIMARY KEY,
+      congregation_id INTEGER NOT NULL REFERENCES congregations(id),
       talk_number INTEGER NOT NULL,
       title TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(congregation_id, talk_number),
-      FOREIGN KEY (congregation_id) REFERENCES congregations(id)
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(congregation_id, talk_number)
     );
   `);
 
-  // Публичные речи (запланированные и прошедшие; статистика по прошедшим)
-  db.exec(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS talks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      congregation_id INTEGER NOT NULL,
-      date TEXT NOT NULL,
+      id SERIAL PRIMARY KEY,
+      congregation_id INTEGER NOT NULL REFERENCES congregations(id),
+      date DATE NOT NULL,
       song_number INTEGER NOT NULL,
       talk_number INTEGER NOT NULL,
       title TEXT NOT NULL,
       speaker_name TEXT NOT NULL,
       speaker_phone TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (congregation_id) REFERENCES congregations(id)
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
 
-  // Уведомления: 7 дней и 12 часов (чтобы не слать дважды)
-  db.exec(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS notifications_sent (
-      talk_id INTEGER NOT NULL,
+      talk_id INTEGER NOT NULL REFERENCES talks(id) ON DELETE CASCADE,
       type TEXT NOT NULL,
-      sent_at TEXT DEFAULT (datetime('now')),
-      PRIMARY KEY (talk_id, type),
-      FOREIGN KEY (talk_id) REFERENCES talks(id)
+      sent_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (talk_id, type)
     );
   `);
 
-  return db;
+  return pool;
 }

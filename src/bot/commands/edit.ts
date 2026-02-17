@@ -44,7 +44,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     const today = new Date().toISOString().slice(0, 10);
 
     if (ids.length === 1) {
-      const list = talks.listByCongregation(ids[0], { fromDate: today });
+      const list = await talks.listByCongregation(ids[0], { fromDate: today });
       const dates = [...new Set(list.map((t) => t.date))].sort();
       if (dates.length === 0) {
         await ctx.reply('Нет предстоящих речей для редактирования. Добавить: /add');
@@ -60,10 +60,10 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     }
 
     editState.set(userId, { step: 'congregation' });
-    const buttons = ids.map((id) => {
-      const c = congRepo.getById(id);
+    const buttons = await Promise.all(ids.map(async (id) => {
+      const c = await congRepo.getById(id);
       return Markup.button.callback(c?.name ?? `Община ${id}`, `edit:cong:${id}`);
-    });
+    }));
     await ctx.reply('Выберите общину:', Markup.inlineKeyboard(buttons.map((b) => [b])));
   });
 
@@ -76,7 +76,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       return;
     }
     const today = new Date().toISOString().slice(0, 10);
-    const list = talks.listByCongregation(congregationId, { fromDate: today });
+    const list = await talks.listByCongregation(congregationId, { fromDate: today });
     const dates = [...new Set(list.map((t) => t.date))].sort();
     if (dates.length === 0) {
       await ctx.editMessageText('В этой общине нет предстоящих речей для редактирования.');
@@ -98,7 +98,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       await ctx.answerCbQuery('Выберите общину и дату заново: /edit');
       return;
     }
-    const onDate = talks.listByCongregation(state.congregationId, { fromDate: date, toDate: date });
+    const onDate = await talks.listByCongregation(state.congregationId, { fromDate: date, toDate: date });
     if (onDate.length === 0) {
       await ctx.answerCbQuery('На эту дату речей не найдено.');
       return;
@@ -119,13 +119,13 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     const userId = ctx.from?.id;
     if (!userId) return;
     const talkId = parseInt(ctx.match[1], 10);
-    const talk = talks.getById(talkId);
+    const talk = await talks.getById(talkId);
     if (!talk || !ctx.congregationIds?.includes(talk.congregation_id)) {
       await ctx.answerCbQuery('Нет доступа к этой речи.');
       return;
     }
     editState.set(userId, { step: 'field', talkId });
-    const cong = congRepo.getById(talk.congregation_id);
+    const cong = await congRepo.getById(talk.congregation_id);
     await ctx.editMessageText(
       `Редактирование речи (${cong?.name ?? ''}):\n` +
         `Дата: ${talk.date}\n` +
@@ -162,7 +162,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     if (!['date', 'song', 'talk_number', 'speaker_name', 'speaker_phone'].includes(field)) return;
     const state = editState.get(userId);
     if (!state || state.step !== 'field' || state.talkId === undefined) return;
-    const talk = talks.getById(state.talkId);
+    const talk = await talks.getById(state.talkId);
     if (!talk || !ctx.congregationIds?.includes(talk.congregation_id)) {
       await ctx.answerCbQuery('Нет доступа.');
       return;
@@ -194,7 +194,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       return next();
     }
 
-    const talk = talks.getById(state.talkId);
+    const talk = await talks.getById(state.talkId);
     if (!talk) {
       editState.delete(userId);
       await ctx.reply('Речь не найдена.');
@@ -245,12 +245,12 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     else if (state.step === 'song') update.song_number = value as number;
     else if (state.step === 'talk_number') {
       update.talk_number = value as number;
-      const newTitle = getTitleForTalk(db, value as number);
+      const newTitle = await getTitleForTalk(db, value as number);
       if (newTitle) update.title = newTitle;
     } else if (state.step === 'speaker_name') update.speaker_name = text;
     else if (state.step === 'speaker_phone') update.speaker_phone = text;
 
-    talks.update(state.talkId, update);
+    await talks.update(state.talkId, update);
     editState.delete(userId);
     await ctx.reply(`✅ Речь обновлена.`);
   });

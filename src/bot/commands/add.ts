@@ -49,17 +49,17 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
 
     if (ids.length === 1) {
       wizardState.set(userId, { step: 'date', congregationId: ids[0] });
-      const cong = congRepo.getById(ids[0]);
+      const cong = await congRepo.getById(ids[0]);
       await ctx.reply(
         `Шаг 1 из 7. Община: ${cong?.name ?? ids[0]}.\n\nВведите дату речи (ГГГГ-ММ-ДД), например 2025-02-10.\nОтмена: /cancel`
       );
       return;
     }
     wizardState.set(userId, { step: 'congregation' });
-    const buttons = ids.map((id) => {
-      const c = congRepo.getById(id);
+    const buttons = await Promise.all(ids.map(async (id) => {
+      const c = await congRepo.getById(id);
       return Markup.button.callback(c?.name ?? `Община ${id}`, `add:cong:${id}`);
-    });
+    }));
     await ctx.reply('Шаг 1 из 7. Выберите общину (отмена: /cancel):', Markup.inlineKeyboard(buttons));
   };
 
@@ -75,7 +75,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       return;
     }
     wizardState.set(userId, { step: 'date', congregationId });
-    const cong = congRepo.getById(congregationId);
+    const cong = await congRepo.getById(congregationId);
     await ctx.editMessageText(
       `Шаг 1 из 7. Община: ${cong?.name ?? congregationId}.\n\nВведите дату речи (ГГГГ-ММ-ДД), например 2025-02-10.\nОтмена: /cancel`
     );
@@ -140,7 +140,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       }
       state.talk_number = n;
       const congregationId = state.congregationId!;
-      const title = getTitleForTalk(db, n);
+      const title = await getTitleForTalk(db, n);
       if (title) {
         state.title = title;
         state.step = 'speaker_name';
@@ -193,8 +193,8 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
         speaker_name: state.speaker_name,
         speaker_phone: state.speaker_phone,
       };
-      const id = talks.create(input);
-      const cong = congRepo.getById(state.congregationId);
+      const id = await talks.create(input);
+      const cong = await congRepo.getById(state.congregationId);
       const songDisplay = state.song_number === 0 ? '?' : state.song_number;
       await ctx.reply(
         `✅ Речь добавлена (ID: ${id}).\n` +

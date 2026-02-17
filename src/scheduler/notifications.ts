@@ -20,11 +20,12 @@ function addDays(date: Date, days: number): string {
 /**
  * Возвращает ID пользователей, имеющих доступ к общине
  */
-function getUserIdsForCongregation(db: DatabaseInstance, congregationId: number): number[] {
-  const rows = db
-    .prepare('SELECT user_id FROM user_congregations WHERE congregation_id = ?')
-    .all(congregationId) as { user_id: number }[];
-  return rows.map((r) => r.user_id);
+async function getUserIdsForCongregation(db: DatabaseInstance, congregationId: number): Promise<number[]> {
+  const result = await db.query(
+    'SELECT user_id FROM user_congregations WHERE congregation_id = $1',
+    [congregationId]
+  );
+  return result.rows.map((r: { user_id: number }) => r.user_id);
 }
 
 export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: number = 60 * 60 * 1000): NodeJS.Timeout {
@@ -38,12 +39,12 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
     const tomorrow = addDays(new Date(), 1);
 
     // Уведомление «за 7 дней»
-    const talksIn7Days = talks.listUpcoming(in7Days, in7Days);
+    const talksIn7Days = await talks.listUpcoming(in7Days, in7Days);
     for (const talk of talksIn7Days) {
-      if (notifRepo.wasSent(talk.id, NOTIFY_7_DAYS)) continue;
-      const cong = congRepo.getById(talk.congregation_id);
+      if (await notifRepo.wasSent(talk.id, NOTIFY_7_DAYS)) continue;
+      const cong = await congRepo.getById(talk.congregation_id);
       const name = cong?.name ?? 'Община';
-      const userIds = getUserIdsForCongregation(db, talk.congregation_id);
+      const userIds = await getUserIdsForCongregation(db, talk.congregation_id);
       const songDisplay = talk.song_number === 0 ? '?' : talk.song_number;
       const text =
         `📅 Напоминание (через 7 дней)\n\n` +
@@ -60,16 +61,16 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
           // пользователь мог заблокировать бота
         }
       }
-      notifRepo.markSent(talk.id, NOTIFY_7_DAYS);
+      await notifRepo.markSent(talk.id, NOTIFY_7_DAYS);
     }
 
     // Уведомление «за 12 часов» — трактуем как за 1 день (накануне)
-    const talksTomorrow = talks.listUpcoming(tomorrow, tomorrow);
+    const talksTomorrow = await talks.listUpcoming(tomorrow, tomorrow);
     for (const talk of talksTomorrow) {
-      if (notifRepo.wasSent(talk.id, NOTIFY_12_HOURS)) continue;
-      const cong = congRepo.getById(talk.congregation_id);
+      if (await notifRepo.wasSent(talk.id, NOTIFY_12_HOURS)) continue;
+      const cong = await congRepo.getById(talk.congregation_id);
       const name = cong?.name ?? 'Община';
-      const userIds = getUserIdsForCongregation(db, talk.congregation_id);
+      const userIds = await getUserIdsForCongregation(db, talk.congregation_id);
       const songDisplay = talk.song_number === 0 ? '?' : talk.song_number;
       const text =
         `⏰ Напоминание: завтра речь\n\n` +
@@ -85,7 +86,7 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
           // пользователь мог заблокировать бота
         }
       }
-      notifRepo.markSent(talk.id, NOTIFY_12_HOURS);
+      await notifRepo.markSent(talk.id, NOTIFY_12_HOURS);
     }
   }
 

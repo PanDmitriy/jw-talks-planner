@@ -12,8 +12,20 @@ const DAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTH_NAMES = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 
 /** Краткая подпись даты для кнопки: "10 фев (сб)" */
-function formatDateShort(isoDate: string): string {
-  const [y, m, d] = isoDate.split('-').map(Number);
+function toYmdString(value: string | Date | number): string {
+  if (typeof value === 'string') {
+    return value.includes('T') ? value.split('T')[0] : value;
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** Краткая подпись даты для кнопки: "10 фев (сб)" */
+function formatDateShort(isoDate: string | Date | number): string {
+  const [y, m, d] = toYmdString(isoDate).split('-').map(Number);
   const date = new Date(y, m - 1, d);
   const dayName = DAY_NAMES[date.getDay()];
   const month = MONTH_NAMES[m - 1];
@@ -35,8 +47,8 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
 
     if (ids.length === 1) {
       const congregationId = ids[0];
-      const list = talks.listByCongregation(congregationId, { fromDate: today });
-      const dates = [...new Set(list.map((t) => t.date))].sort();
+      const list = await talks.listByCongregation(congregationId, { fromDate: today });
+      const dates = [...new Set(list.map((t) => toYmdString(t.date)))].sort();
       if (dates.length === 0) {
         await ctx.reply('Нет предстоящих речей для удаления.');
         return;
@@ -51,10 +63,10 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
       return;
     }
 
-    const buttons = ids.map((id) => {
-      const c = congRepo.getById(id);
+    const buttons = await Promise.all(ids.map(async (id) => {
+      const c = await congRepo.getById(id);
       return Markup.button.callback(c?.name ?? `Община ${id}`, `delete:cong:${id}`);
-    });
+    }));
     await ctx.reply('Выберите общину:', Markup.inlineKeyboard(buttons.map((b) => [b])));
   });
 
@@ -67,8 +79,8 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
       return;
     }
     const today = new Date().toISOString().slice(0, 10);
-    const list = talks.listByCongregation(congregationId, { fromDate: today });
-    const dates = [...new Set(list.map((t) => t.date))].sort();
+    const list = await talks.listByCongregation(congregationId, { fromDate: today });
+    const dates = [...new Set(list.map((t) => toYmdString(t.date)))].sort();
     if (dates.length === 0) {
       await ctx.editMessageText('В этой общине нет предстоящих речей для удаления.');
       return;
@@ -91,7 +103,7 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
       await ctx.answerCbQuery('Нет доступа.');
       return;
     }
-    const onDate = talks.listByCongregation(congregationId, { fromDate: date, toDate: date });
+    const onDate = await talks.listByCongregation(congregationId, { fromDate: date, toDate: date });
     const talk = onDate[0];
     if (!talk) {
       await ctx.answerCbQuery('На эту дату речей не найдено.');
@@ -116,12 +128,12 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
       await ctx.answerCbQuery('Сессия изменилась. Выполните /delete снова.');
       return;
     }
-    const talk = talks.getById(talkId);
+    const talk = await talks.getById(talkId);
     if (!talk || !ctx.congregationIds?.includes(talk.congregation_id)) {
       await ctx.answerCbQuery('Нет доступа.');
       return;
     }
-    talks.delete(talkId);
+    await talks.delete(talkId);
     pendingDelete.delete(userId);
     await ctx.editMessageText(`✅ Речь удалена (${formatDateShort(talk.date)}).`);
   });

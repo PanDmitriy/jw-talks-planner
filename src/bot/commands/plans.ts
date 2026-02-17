@@ -14,9 +14,9 @@ export function registerPlansCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
   const congRepo = congregationsRepo(db);
   const defaultRepo = defaultTalkTitlesRepo(db);
 
-  const showList = (congregationId: number) => {
-    const list = defaultRepo.listAll();
-    const cong = congRepo.getById(congregationId);
+  const showList = async (congregationId: number): Promise<string> => {
+    const list = await defaultRepo.listAll();
+    const cong = await congRepo.getById(congregationId);
     const name = cong?.name ?? `Община ${congregationId}`;
     if (list.length === 0) return `📋 Список речей — ${name}\n\nПока пусто.`;
     const lines = list.map((p) => `• №${p.talk_number} — ${p.title}`).join('\n');
@@ -32,24 +32,25 @@ export function registerPlansCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     const congregationName = args.join(' ').trim();
 
     if (ids.length === 1 && !congregationName) {
-      const out = showList(ids[0]);
+      const out = await showList(ids[0]);
       const chunks = splitMessage(out);
       for (const chunk of chunks) await ctx.reply(chunk);
       return;
     }
     if (congregationName) {
-      const cong = congRepo.listAll().find((c) => c.name.toLowerCase() === congregationName.toLowerCase());
+      const allCong = await congRepo.listAll();
+      const cong = allCong.find((c) => c.name.toLowerCase() === congregationName.toLowerCase());
       if (cong && ids.includes(cong.id)) {
-        const out = showList(cong.id);
+        const out = await showList(cong.id);
         const chunks = splitMessage(out);
         for (const chunk of chunks) await ctx.reply(chunk);
         return;
       }
     }
-    const buttons = ids.map((id) => {
-      const c = congRepo.getById(id);
+    const buttons = await Promise.all(ids.map(async (id) => {
+      const c = await congRepo.getById(id);
       return Markup.button.callback(c?.name ?? `Община ${id}`, `plans:cong:${id}`);
-    });
+    }));
     await ctx.reply('Выберите общину:', Markup.inlineKeyboard(buttons));
   });
 
@@ -59,7 +60,7 @@ export function registerPlansCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
       await ctx.answerCbQuery('Нет доступа.');
       return;
     }
-    const out = showList(congregationId);
+    const out = await showList(congregationId);
     const chunks = splitMessage(out);
     await ctx.editMessageText(chunks[0]);
     const chatId = ctx.chat?.id;

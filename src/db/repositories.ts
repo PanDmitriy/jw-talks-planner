@@ -1,5 +1,5 @@
 /**
- * Репозитории для работы с таблицами SQLite
+ * Репозитории для работы с PostgreSQL
  */
 
 import type { DatabaseInstance } from './schema';
@@ -19,115 +19,132 @@ import type {
 
 export function congregationsRepo(db: DatabaseInstance) {
   return {
-    create(name: string): number {
-      const stmt = db.prepare('INSERT INTO congregations (name) VALUES (?)');
-      const result = stmt.run(name);
-      return result.lastInsertRowid as number;
+    async create(name: string): Promise<number> {
+      const result = await db.query(
+        'INSERT INTO congregations (name) VALUES ($1) RETURNING id',
+        [name]
+      );
+      return result.rows[0].id as number;
     },
-    getById(id: number): Congregation | undefined {
-      return db.prepare('SELECT * FROM congregations WHERE id = ?').get(id) as Congregation | undefined;
+    async getById(id: number): Promise<Congregation | undefined> {
+      const result = await db.query('SELECT * FROM congregations WHERE id = $1', [id]);
+      return result.rows[0] as Congregation | undefined;
     },
-    getByName(name: string): Congregation | undefined {
-      return db.prepare('SELECT * FROM congregations WHERE name = ?').get(name) as Congregation | undefined;
+    async getByName(name: string): Promise<Congregation | undefined> {
+      const result = await db.query('SELECT * FROM congregations WHERE name = $1', [name]);
+      return result.rows[0] as Congregation | undefined;
     },
-    listAll(): Congregation[] {
-      return db.prepare('SELECT * FROM congregations ORDER BY name').all() as Congregation[];
+    async listAll(): Promise<Congregation[]> {
+      const result = await db.query('SELECT * FROM congregations ORDER BY name');
+      return result.rows as Congregation[];
     },
-    updateName(id: number, name: string): void {
-      db.prepare('UPDATE congregations SET name = ? WHERE id = ?').run(name, id);
+    async updateName(id: number, name: string): Promise<void> {
+      await db.query('UPDATE congregations SET name = $1 WHERE id = $2', [name, id]);
     },
   };
 }
 
-// --- Общий список названий речей по умолчанию (для всех общин, редактируемый) ---
+// --- Общий список названий речей по умолчанию ---
 
 export function defaultTalkTitlesRepo(db: DatabaseInstance) {
   return {
-    listAll(): DefaultTalkTitle[] {
-      return db
-        .prepare('SELECT talk_number, title, updated_at FROM default_talk_titles ORDER BY talk_number')
-        .all() as DefaultTalkTitle[];
+    async listAll(): Promise<DefaultTalkTitle[]> {
+      const result = await db.query(
+        'SELECT talk_number, title, updated_at FROM default_talk_titles ORDER BY talk_number'
+      );
+      return result.rows as DefaultTalkTitle[];
     },
-    getByNumber(talkNumber: number): DefaultTalkTitle | undefined {
-      return db
-        .prepare('SELECT talk_number, title, updated_at FROM default_talk_titles WHERE talk_number = ?')
-        .get(talkNumber) as DefaultTalkTitle | undefined;
+    async getByNumber(talkNumber: number): Promise<DefaultTalkTitle | undefined> {
+      const result = await db.query(
+        'SELECT talk_number, title, updated_at FROM default_talk_titles WHERE talk_number = $1',
+        [talkNumber]
+      );
+      return result.rows[0] as DefaultTalkTitle | undefined;
     },
-    updateTitle(talkNumber: number, title: string): void {
-      db.prepare(
-        "UPDATE default_talk_titles SET title = ?, updated_at = datetime('now') WHERE talk_number = ?"
-      ).run(title, talkNumber);
+    async updateTitle(talkNumber: number, title: string): Promise<void> {
+      await db.query(
+        "UPDATE default_talk_titles SET title = $1, updated_at = NOW() WHERE talk_number = $2",
+        [title, talkNumber]
+      );
     },
   };
 }
 
-// --- План речей (номер + название по общине; переопределения над общим списком) ---
+// --- План речей по общине ---
 
 export function talkPlansRepo(db: DatabaseInstance) {
   return {
-    create(congregationId: number, talkNumber: number, title: string): number {
-      const stmt = db.prepare(
-        'INSERT INTO talk_plans (congregation_id, talk_number, title) VALUES (?, ?, ?)'
+    async create(congregationId: number, talkNumber: number, title: string): Promise<number> {
+      const result = await db.query(
+        'INSERT INTO talk_plans (congregation_id, talk_number, title) VALUES ($1, $2, $3) RETURNING id',
+        [congregationId, talkNumber, title]
       );
-      const result = stmt.run(congregationId, talkNumber, title);
-      return result.lastInsertRowid as number;
+      return result.rows[0].id as number;
     },
-    /** Добавить или обновить название по номеру для общины. */
-    upsert(congregationId: number, talkNumber: number, title: string): void {
-      const existing = db
-        .prepare('SELECT id FROM talk_plans WHERE congregation_id = ? AND talk_number = ?')
-        .get(congregationId, talkNumber) as { id: number } | undefined;
-      if (existing) {
-        db.prepare('UPDATE talk_plans SET title = ? WHERE id = ?').run(title, existing.id);
+    async upsert(congregationId: number, talkNumber: number, title: string): Promise<void> {
+      const existing = await db.query(
+        'SELECT id FROM talk_plans WHERE congregation_id = $1 AND talk_number = $2',
+        [congregationId, talkNumber]
+      );
+      if (existing.rows[0]) {
+        await db.query('UPDATE talk_plans SET title = $1 WHERE id = $2', [
+          title,
+          (existing.rows[0] as { id: number }).id,
+        ]);
       } else {
-        db.prepare(
-          'INSERT INTO talk_plans (congregation_id, talk_number, title) VALUES (?, ?, ?)'
-        ).run(congregationId, talkNumber, title);
+        await db.query(
+          'INSERT INTO talk_plans (congregation_id, talk_number, title) VALUES ($1, $2, $3)',
+          [congregationId, talkNumber, title]
+        );
       }
     },
-    getById(id: number): TalkPlan | undefined {
-      return db.prepare('SELECT * FROM talk_plans WHERE id = ?').get(id) as TalkPlan | undefined;
+    async getById(id: number): Promise<TalkPlan | undefined> {
+      const result = await db.query('SELECT * FROM talk_plans WHERE id = $1', [id]);
+      return result.rows[0] as TalkPlan | undefined;
     },
-    getByNumber(congregationId: number, talkNumber: number): TalkPlan | undefined {
-      return db
-        .prepare('SELECT * FROM talk_plans WHERE congregation_id = ? AND talk_number = ?')
-        .get(congregationId, talkNumber) as TalkPlan | undefined;
+    async getByNumber(congregationId: number, talkNumber: number): Promise<TalkPlan | undefined> {
+      const result = await db.query(
+        'SELECT * FROM talk_plans WHERE congregation_id = $1 AND talk_number = $2',
+        [congregationId, talkNumber]
+      );
+      return result.rows[0] as TalkPlan | undefined;
     },
-    listByCongregation(congregationId: number): TalkPlan[] {
-      return db
-        .prepare('SELECT * FROM talk_plans WHERE congregation_id = ? ORDER BY talk_number')
-        .all(congregationId) as TalkPlan[];
+    async listByCongregation(congregationId: number): Promise<TalkPlan[]> {
+      const result = await db.query(
+        'SELECT * FROM talk_plans WHERE congregation_id = $1 ORDER BY talk_number',
+        [congregationId]
+      );
+      return result.rows as TalkPlan[];
     },
-    updateTitle(id: number, title: string): void {
-      db.prepare('UPDATE talk_plans SET title = ? WHERE id = ?').run(title, id);
+    async updateTitle(id: number, title: string): Promise<void> {
+      await db.query('UPDATE talk_plans SET title = $1 WHERE id = $2', [title, id]);
     },
-    delete(id: number): void {
-      db.prepare('DELETE FROM talk_plans WHERE id = ?').run(id);
+    async delete(id: number): Promise<void> {
+      await db.query('DELETE FROM talk_plans WHERE id = $1', [id]);
     },
-    deleteByNumber(congregationId: number, talkNumber: number): void {
-      db.prepare('DELETE FROM talk_plans WHERE congregation_id = ? AND talk_number = ?').run(
-        congregationId,
-        talkNumber
+    async deleteByNumber(congregationId: number, talkNumber: number): Promise<void> {
+      await db.query(
+        'DELETE FROM talk_plans WHERE congregation_id = $1 AND talk_number = $2',
+        [congregationId, talkNumber]
       );
     },
   };
 }
 
-/** Элемент объединённого списка речей по общине (номер + название, возможно из переопределения). */
+/** Элемент объединённого списка речей по общине. */
 export interface MergedPlanItem {
   talk_number: number;
   title: string;
-  /** id в talk_plans, если это переопределение общины */
   planId?: number;
 }
 
-/** Объединённый список: default_talk_titles с переопределениями из talk_plans для общины. */
-export function getMergedPlansForCongregation(
+/** Объединённый список: default_talk_titles с переопределениями из talk_plans. */
+export async function getMergedPlansForCongregation(
   db: DatabaseInstance,
   congregationId: number
-): MergedPlanItem[] {
-  const defaultList = defaultTalkTitlesRepo(db).listAll();
-  const overrides = talkPlansRepo(db).listByCongregation(congregationId);
+): Promise<MergedPlanItem[]> {
+  const defaultList = await defaultTalkTitlesRepo(db).listAll();
+  const overrides = await talkPlansRepo(db).listByCongregation(congregationId);
   const overrideMap = new Map(overrides.map((p) => [p.talk_number, { title: p.title, id: p.id }]));
   return defaultList.map((d) => {
     const ov = overrideMap.get(d.talk_number);
@@ -139,9 +156,12 @@ export function getMergedPlansForCongregation(
   });
 }
 
-/** Название речи по номеру из списка по умолчанию (default_talk_titles). */
-export function getTitleForTalk(db: DatabaseInstance, talkNumber: number): string | undefined {
-  const def = defaultTalkTitlesRepo(db).getByNumber(talkNumber);
+/** Название речи по номеру из списка по умолчанию. */
+export async function getTitleForTalk(
+  db: DatabaseInstance,
+  talkNumber: number
+): Promise<string | undefined> {
+  const def = await defaultTalkTitlesRepo(db).getByNumber(talkNumber);
   return def?.title;
 }
 
@@ -149,28 +169,37 @@ export function getTitleForTalk(db: DatabaseInstance, talkNumber: number): strin
 
 export function userCongregationsRepo(db: DatabaseInstance) {
   return {
-    grant(userId: number, username: string | null, congregationId: number): void {
-      const stmt = db.prepare(
-        'INSERT OR REPLACE INTO user_congregations (user_id, username, congregation_id, granted_at) VALUES (?, ?, ?, datetime(\'now\'))'
+    async grant(userId: number, username: string | null, congregationId: number): Promise<void> {
+      await db.query(
+        `INSERT INTO user_congregations (user_id, username, congregation_id, granted_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (user_id, congregation_id) DO UPDATE SET username = $2, granted_at = NOW()`,
+        [userId, username ?? null, congregationId]
       );
-      stmt.run(userId, username ?? null, congregationId);
     },
-    getCongregationsForUser(userId: number): UserCongregation[] {
-      return db
-        .prepare(
-          'SELECT uc.*, c.name as congregation_name FROM user_congregations uc JOIN congregations c ON c.id = uc.congregation_id WHERE uc.user_id = ?'
-        )
-        .all(userId) as unknown as UserCongregation[];
+    async getCongregationsForUser(userId: number): Promise<UserCongregation[]> {
+      const result = await db.query(
+        `SELECT uc.user_id, uc.username, uc.congregation_id, uc.granted_at
+         FROM user_congregations uc
+         JOIN congregations c ON c.id = uc.congregation_id
+         WHERE uc.user_id = $1`,
+        [userId]
+      );
+      return result.rows as UserCongregation[];
     },
-    getCongregationIdsForUser(userId: number): number[] {
-      const rows = db.prepare('SELECT congregation_id FROM user_congregations WHERE user_id = ?').all(userId) as {
-        congregation_id: number;
-      }[];
-      return rows.map((r) => r.congregation_id);
+    async getCongregationIdsForUser(userId: number): Promise<number[]> {
+      const result = await db.query(
+        'SELECT congregation_id FROM user_congregations WHERE user_id = $1',
+        [userId]
+      );
+      return result.rows.map((r: { congregation_id: number }) => r.congregation_id);
     },
-    hasAccess(userId: number, congregationId: number): boolean {
-      const row = db.prepare('SELECT 1 FROM user_congregations WHERE user_id = ? AND congregation_id = ?').get(userId, congregationId);
-      return !!row;
+    async hasAccess(userId: number, congregationId: number): Promise<boolean> {
+      const result = await db.query(
+        'SELECT 1 FROM user_congregations WHERE user_id = $1 AND congregation_id = $2',
+        [userId, congregationId]
+      );
+      return result.rows.length > 0;
     },
   };
 }
@@ -179,169 +208,231 @@ export function userCongregationsRepo(db: DatabaseInstance) {
 
 export function talksRepo(db: DatabaseInstance) {
   return {
-    create(input: TalkInput): number {
-      const stmt = db.prepare(`
-        INSERT INTO talks (congregation_id, date, song_number, talk_number, title, speaker_name, speaker_phone)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
-      const result = stmt.run(
-        input.congregation_id,
-        input.date,
-        input.song_number,
-        input.talk_number,
-        input.title,
-        input.speaker_name,
-        input.speaker_phone
+    async create(input: TalkInput): Promise<number> {
+      const result = await db.query(
+        `INSERT INTO talks (congregation_id, date, song_number, talk_number, title, speaker_name, speaker_phone)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [
+          input.congregation_id,
+          input.date,
+          input.song_number,
+          input.talk_number,
+          input.title,
+          input.speaker_name,
+          input.speaker_phone,
+        ]
       );
-      return result.lastInsertRowid as number;
+      return result.rows[0].id as number;
     },
-    update(id: number, input: Partial<TalkInput>): void {
+    async update(id: number, input: Partial<TalkInput>): Promise<void> {
       const fields: string[] = [];
       const values: unknown[] = [];
+      let pos = 1;
       if (input.date !== undefined) {
-        fields.push('date = ?');
+        fields.push(`date = $${pos++}`);
         values.push(input.date);
       }
       if (input.song_number !== undefined) {
-        fields.push('song_number = ?');
+        fields.push(`song_number = $${pos++}`);
         values.push(input.song_number);
       }
       if (input.talk_number !== undefined) {
-        fields.push('talk_number = ?');
+        fields.push(`talk_number = $${pos++}`);
         values.push(input.talk_number);
       }
       if (input.title !== undefined) {
-        fields.push('title = ?');
+        fields.push(`title = $${pos++}`);
         values.push(input.title);
       }
       if (input.speaker_name !== undefined) {
-        fields.push('speaker_name = ?');
+        fields.push(`speaker_name = $${pos++}`);
         values.push(input.speaker_name);
       }
       if (input.speaker_phone !== undefined) {
-        fields.push('speaker_phone = ?');
+        fields.push(`speaker_phone = $${pos++}`);
         values.push(input.speaker_phone);
       }
       if (fields.length === 0) return;
-      fields.push("updated_at = datetime('now')");
+      fields.push('updated_at = NOW()');
       values.push(id);
-      const sql = `UPDATE talks SET ${fields.join(', ')} WHERE id = ?`;
-      db.prepare(sql).run(...values);
+      const sql = `UPDATE talks SET ${fields.join(', ')} WHERE id = $${pos}`;
+      await db.query(sql, values);
     },
-    delete(id: number): void {
-      db.prepare('DELETE FROM talks WHERE id = ?').run(id);
-      db.prepare('DELETE FROM notifications_sent WHERE talk_id = ?').run(id);
+    async delete(id: number): Promise<void> {
+      await db.query('DELETE FROM notifications_sent WHERE talk_id = $1', [id]);
+      await db.query('DELETE FROM talks WHERE id = $1', [id]);
     },
-    getById(id: number): Talk | undefined {
-      return db.prepare('SELECT * FROM talks WHERE id = ?').get(id) as Talk | undefined;
+    async getById(id: number): Promise<Talk | undefined> {
+      const result = await db.query(
+        `SELECT
+           id,
+           congregation_id,
+           date::text as date,
+           song_number,
+           talk_number,
+           title,
+           speaker_name,
+           speaker_phone,
+           created_at::text as created_at,
+           updated_at::text as updated_at
+         FROM talks
+         WHERE id = $1`,
+        [id]
+      );
+      const row = result.rows[0];
+      if (!row) return undefined;
+      return row as Talk;
     },
-    listByCongregation(congregationId: number, options?: { fromDate?: string; toDate?: string }): Talk[] {
-      let sql = 'SELECT * FROM talks WHERE congregation_id = ?';
+    async listByCongregation(
+      congregationId: number,
+      options?: { fromDate?: string; toDate?: string }
+    ): Promise<Talk[]> {
+      let sql = `SELECT
+        id,
+        congregation_id,
+        date::text as date,
+        song_number,
+        talk_number,
+        title,
+        speaker_name,
+        speaker_phone,
+        created_at::text as created_at,
+        updated_at::text as updated_at
+      FROM talks WHERE congregation_id = $1`;
       const params: (number | string)[] = [congregationId];
+      let pos = 2;
       if (options?.fromDate) {
-        sql += ' AND date >= ?';
+        sql += ` AND date >= $${pos++}`;
         params.push(options.fromDate);
       }
       if (options?.toDate) {
-        sql += ' AND date <= ?';
+        sql += ` AND date <= $${pos++}`;
         params.push(options.toDate);
       }
       sql += ' ORDER BY date, id';
-      return db.prepare(sql).all(...params) as Talk[];
+      const result = await db.query(sql, params);
+      return result.rows as Talk[];
     },
-    /** Список предстоящих речей (для уведомлений) */
-    listUpcoming(fromDate: string, toDate: string): Talk[] {
-      return db
-        .prepare('SELECT * FROM talks WHERE date >= ? AND date <= ? ORDER BY date')
-        .all(fromDate, toDate) as Talk[];
+    async listUpcoming(fromDate: string, toDate: string): Promise<Talk[]> {
+      const result = await db.query(
+        `SELECT
+           id,
+           congregation_id,
+           date::text as date,
+           song_number,
+           talk_number,
+           title,
+           speaker_name,
+           speaker_phone,
+           created_at::text as created_at,
+           updated_at::text as updated_at
+         FROM talks
+         WHERE date >= $1 AND date <= $2
+         ORDER BY date`,
+        [fromDate, toDate]
+      );
+      return result.rows as Talk[];
     },
-    /** Все предстоящие речи по общине (дата >= сегодня) */
-    listUpcomingByCongregation(congregationId: number, fromDate: string): Talk[] {
-      return db
-        .prepare('SELECT * FROM talks WHERE congregation_id = ? AND date >= ? ORDER BY date')
-        .all(congregationId, fromDate) as Talk[];
+    async listUpcomingByCongregation(
+      congregationId: number,
+      fromDate: string
+    ): Promise<Talk[]> {
+      const result = await db.query(
+        `SELECT
+           id,
+           congregation_id,
+           date::text as date,
+           song_number,
+           talk_number,
+           title,
+           speaker_name,
+           speaker_phone,
+           created_at::text as created_at,
+           updated_at::text as updated_at
+         FROM talks
+         WHERE congregation_id = $1 AND date >= $2
+         ORDER BY date`,
+        [congregationId, fromDate]
+      );
+      return result.rows as Talk[];
     },
   };
 }
 
-// --- Статистика (по прошедшим речам, date <= сегодня) ---
+// --- Статистика ---
 
-export function getTalkStats(db: DatabaseInstance, congregationId: number): TalkStats[] {
+export async function getTalkStats(
+  db: DatabaseInstance,
+  congregationId: number
+): Promise<TalkStats[]> {
   const today = new Date().toISOString().slice(0, 10);
-  const rows = db
-    .prepare(
-      `
-    SELECT talk_number, title,
-           COUNT(*) as total_count,
-           MAX(date) as last_date
-    FROM talks
-    WHERE congregation_id = ? AND date <= ?
-    GROUP BY talk_number, title
-    ORDER BY talk_number
-  `
-    )
-    .all(congregationId, today) as (TalkStats & { last_date: string })[];
-
-  return rows.map((r) => {
+  const result = await db.query(
+    `SELECT talk_number, title, COUNT(*)::int as total_count, MAX(date)::text as last_date
+     FROM talks
+     WHERE congregation_id = $1 AND date <= $2
+     GROUP BY talk_number, title
+     ORDER BY talk_number`,
+    [congregationId, today]
+  );
+  const rows = result.rows as (TalkStats & { last_date: string })[];
+  const out: TalkStats[] = [];
+  for (const r of rows) {
     let last_speaker: string | null = null;
     if (r.last_date) {
-      const last = db
-        .prepare(
-          'SELECT speaker_name FROM talks WHERE congregation_id = ? AND date <= ? AND talk_number = ? AND title = ? ORDER BY date DESC LIMIT 1'
-        )
-        .get(congregationId, today, r.talk_number, r.title) as { speaker_name: string } | undefined;
-      last_speaker = last?.speaker_name ?? null;
+      const lastResult = await db.query(
+        `SELECT speaker_name FROM talks
+         WHERE congregation_id = $1 AND date <= $2 AND talk_number = $3 AND title = $4
+         ORDER BY date DESC LIMIT 1`,
+        [congregationId, today, r.talk_number, r.title]
+      );
+      last_speaker = (lastResult.rows[0] as { speaker_name: string } | undefined)?.speaker_name ?? null;
     }
-    return {
+    out.push({
       talk_id: 0,
       talk_number: r.talk_number,
       title: r.title,
       total_count: r.total_count,
       last_date: r.last_date ?? null,
       last_speaker,
-    };
-  });
+    });
+  }
+  return out;
 }
 
-export function getSpeakerStats(db: DatabaseInstance, congregationId: number): SpeakerStats[] {
+export async function getSpeakerStats(
+  db: DatabaseInstance,
+  congregationId: number
+): Promise<SpeakerStats[]> {
   const today = new Date().toISOString().slice(0, 10);
-  return db
-    .prepare(
-      `
-    SELECT speaker_name, speaker_phone, COUNT(*) as total_talks
-    FROM talks
-    WHERE congregation_id = ? AND date <= ?
-    GROUP BY speaker_name, speaker_phone
-    ORDER BY total_talks DESC
-  `
-    )
-    .all(congregationId, today) as SpeakerStats[];
+  const result = await db.query(
+    `SELECT speaker_name, speaker_phone, COUNT(*)::int as total_talks
+     FROM talks
+     WHERE congregation_id = $1 AND date <= $2
+     GROUP BY speaker_name, speaker_phone
+     ORDER BY total_talks DESC`,
+    [congregationId, today]
+  );
+  return result.rows as SpeakerStats[];
 }
 
-/** Формат даты для ячейки матрицы: Д.ММ или ДД.ММ */
 function formatDateForMatrix(isoDate: string): string {
   const [y, m, d] = isoDate.split('-').map(Number);
   const month = String(m).padStart(2, '0');
   return `${d}.${month}`;
 }
 
-/**
- * Матрица «речь × год» для учёта по бланку: по каждой речи (1–194) — в каком году когда звучала (дата ДД.ММ).
- * Только прошедшие речи (date <= сегодня).
- */
-export function getTalkStatsByYearMatrix(
+export async function getTalkStatsByYearMatrix(
   db: DatabaseInstance,
   congregationId: number,
   options?: { fromYear?: number; toYear?: number }
-): TalkYearMatrixRow[] {
+): Promise<TalkYearMatrixRow[]> {
   const today = new Date().toISOString().slice(0, 10);
-  const rows = db
-    .prepare(
-      `SELECT talk_number, date FROM talks WHERE congregation_id = ? AND date <= ? ORDER BY talk_number, date`
-    )
-    .all(congregationId, today) as { talk_number: number; date: string }[];
-
-  const titles = defaultTalkTitlesRepo(db).listAll();
+  const result = await db.query(
+    'SELECT talk_number, date::text FROM talks WHERE congregation_id = $1 AND date <= $2 ORDER BY talk_number, date',
+    [congregationId, today]
+  );
+  const rows = result.rows as { talk_number: number; date: string }[];
+  const titles = await defaultTalkTitlesRepo(db).listAll();
   const fromYear = options?.fromYear ?? 2020;
   const toYear = options?.toYear ?? new Date().getFullYear() + 1;
 
@@ -378,19 +469,24 @@ export function getTalkStatsByYearMatrix(
   });
 }
 
-// --- Уведомления (чтобы не слать дважды) ---
+// --- Уведомления ---
 
 export function notificationsRepo(db: DatabaseInstance) {
   return {
-    markSent(talkId: number, type: string): void {
-      db.prepare('INSERT OR REPLACE INTO notifications_sent (talk_id, type, sent_at) VALUES (?, ?, datetime(\'now\'))').run(
-        talkId,
-        type
+    async markSent(talkId: number, type: string): Promise<void> {
+      await db.query(
+        `INSERT INTO notifications_sent (talk_id, type, sent_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (talk_id, type) DO UPDATE SET sent_at = NOW()`,
+        [talkId, type]
       );
     },
-    wasSent(talkId: number, type: string): boolean {
-      const row = db.prepare('SELECT 1 FROM notifications_sent WHERE talk_id = ? AND type = ?').get(talkId, type);
-      return !!row;
+    async wasSent(talkId: number, type: string): Promise<boolean> {
+      const result = await db.query(
+        'SELECT 1 FROM notifications_sent WHERE talk_id = $1 AND type = $2',
+        [talkId, type]
+      );
+      return result.rows.length > 0;
     },
   };
 }

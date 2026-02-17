@@ -1,14 +1,33 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: jw-talks-planner-db
+    ports:
+      - "5433:5432"   # хост:контейнер — 5433 чтобы не конфликтовать с локальным PostgreSQL на 5432
+    environment:
+      POSTGRES_USER: jwbot
+      POSTGRES_PASSWORD: jwbot
+      POSTGRES_DB: jw_talks
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jwbot -d jw_talks"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   bot:
     build: .
     image: jw-talks-planner:latest
     container_name: jw-talks-planner
     env_file: .env
     environment:
-      DB_PATH: /data/talks.db
-    volumes:
-      - bot-data:/data
+      DATABASE_URL: postgresql://jwbot:jwbot@postgres:5432/jw_talks
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  bot-data:
+  postgres-data:

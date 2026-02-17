@@ -26,7 +26,8 @@ export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     }
 
     if (congregationName) {
-      const cong = congRepo.listAll().find((c) => c.name.toLowerCase() === congregationName.toLowerCase());
+      const allCong = await congRepo.listAll();
+      const cong = allCong.find((c) => c.name.toLowerCase() === congregationName.toLowerCase());
       if (cong && ids.includes(cong.id)) {
         await sendStatsForCongregation(ctx, db, cong.id);
         return;
@@ -34,10 +35,10 @@ export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     }
 
     // Несколько общин и не указана — выбор кнопкой
-    const buttons = ids.map((id) => {
-      const c = congRepo.getById(id);
+    const buttons = await Promise.all(ids.map(async (id) => {
+      const c = await congRepo.getById(id);
       return Markup.button.callback(c?.name ?? `Община ${id}`, `stats:cong:${id}`);
-    });
+    }));
     await ctx.reply('Выберите общину:', Markup.inlineKeyboard(buttons));
   };
 
@@ -60,9 +61,9 @@ export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
       return;
     }
     await ctx.answerCbQuery();
-    const cong = congregationsRepo(db).getById(congregationId);
+    const cong = await congregationsRepo(db).getById(congregationId);
     const name = cong?.name ?? `Община ${congregationId}`;
-    const matrix = getTalkStatsByYearMatrix(db, congregationId, { fromYear: 2020, toYear: 2028 });
+    const matrix = await getTalkStatsByYearMatrix(db, congregationId, { fromYear: 2020, toYear: 2028 });
     const years = [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028];
     const header = ['№', 'Название', ...years.map(String)].join(';');
     const escapeCsv = (s: string) => (s.includes(';') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s);
@@ -92,11 +93,11 @@ async function sendStatsForCongregation(
   congregationId: number,
   isEdit = false
 ): Promise<void> {
-  const cong = congregationsRepo(db).getById(congregationId);
+  const cong = await congregationsRepo(db).getById(congregationId);
   const name = cong?.name ?? `Община ${congregationId}`;
 
-  const talkStats = getTalkStats(db, congregationId);
-  const speakerStats = getSpeakerStats(db, congregationId);
+  const talkStats = await getTalkStats(db, congregationId);
+  const speakerStats = await getSpeakerStats(db, congregationId);
 
   let msg = `📊 Статистика — ${name}\n\n`;
   msg += 'По речам (сколько раз звучала, когда в последний раз):\n';
