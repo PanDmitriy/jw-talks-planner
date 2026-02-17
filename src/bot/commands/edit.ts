@@ -11,6 +11,7 @@ import type { TalkInput } from '../../db/types';
 
 type EditStep =
   | 'congregation'
+  | 'period'
   | 'date'   // выбор даты из списка или ввод новой даты
   | 'field'
   | 'song'
@@ -18,9 +19,12 @@ type EditStep =
   | 'speaker_name'
   | 'speaker_phone';
 
+type TalkPeriod = 'past' | 'future';
+
 interface EditTalkState {
   step: EditStep;
   congregationId?: number;
+  period?: TalkPeriod;
   talkId?: number;
 }
 
@@ -29,6 +33,27 @@ const editState = new Map<number, EditTalkState>();
 function isValidDate(s: string): boolean {
   const d = new Date(s);
   return !isNaN(d.getTime()) && s.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
+function getDateStatusLabel(ymd: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return ymd < today ? '🕓 Прошедшая' : '📅 Предстоящая';
+}
+
+function isDateInPeriod(ymd: string, period: TalkPeriod): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  return period === 'past' ? ymd < today : ymd >= today;
+}
+
+function getPeriodLabel(period: TalkPeriod): string {
+  return period === 'past' ? 'прошедшие' : 'будущие';
+}
+
+function getPeriodKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🕓 Прошедшие', 'edit:period:past')],
+    [Markup.button.callback('📅 Будущие', 'edit:period:future')],
+  ]);
 }
 
 export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
@@ -41,21 +66,9 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     const ids = ctx.congregationIds ?? [];
     if (ids.length === 0) return;
 
-    const today = new Date().toISOString().slice(0, 10);
-
     if (ids.length === 1) {
-      const list = await talks.listByCongregation(ids[0], { fromDate: today });
-      const dates = [...new Set(list.map((t) => t.date))].sort();
-      if (dates.length === 0) {
-        await ctx.reply('Нет предстоящих речей для редактирования. Добавить: /add');
-        return;
-      }
-      editState.set(userId, { step: 'date', congregationId: ids[0] });
-      const dateButtons = dates.map((d) => Markup.button.callback(d, `edit:date:${d}`));
-      await ctx.reply(
-        'Выберите дату:',
-        Markup.inlineKeyboard(dateButtons.map((b) => [b]))
-      );
+      editState.set(userId, { step: 'period', congregationId: ids[0] });
+      await ctx.reply('Какие речи хотите редактировать?', getPeriodKeyboard());
       return;
     }
 
@@ -75,17 +88,36 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       await ctx.answerCbQuery('Нет доступа к этой общине.');
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
-    const list = await talks.listByCongregation(congregationId, { fromDate: today });
-    const dates = [...new Set(list.map((t) => t.date))].sort();
+    editState.set(userId, { step: 'period', congregationId });
+    await ctx.editMessageText('Какие речи хотите редактировать?', getPeriodKeyboard());
+  });
+
+  bot.action(/^edit:period:(past|future)$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const period = ctx.match[1] as TalkPeriod;
+    const state = editState.get(userId);
+    if (!state || state.step !== 'period' || state.congregationId === undefined) {
+      await ctx.answerCbQuery('Выберите общину заново: /edit');
+      return;
+    }
+
+    const list = await talks.listByCongregation(state.congregationId);
+    const dates = [...new Set(list.map((t) => t.date).filter((d) => isDateInPeriod(d, period)))].sort();
     if (dates.length === 0) {
-      await ctx.editMessageText('В этой общине нет предстоящих речей для редактирования.');
+      await ctx.editMessageText(`В этой общине нет речей в категории «${getPeriodLabel(period)}».`);
       editState.delete(userId);
       return;
     }
-    editState.set(userId, { step: 'date', congregationId });
-    const dateButtons = dates.map((d) => Markup.button.callback(d, `edit:date:${d}`));
-    await ctx.editMessageText('Выберите дату:', Markup.inlineKeyboard(dateButtons.map((b) => [b])));
+
+    editState.set(userId, { step: 'date', congregationId: state.congregationId, period });
+    const dateButtons = dates.map((d) =>
+      Markup.button.callback(`${d < new Date().toISOString().slice(0, 10) ? '🕓' : '📅'} ${d}`, `edit:date:${d}`)
+    );
+    await ctx.editMessageText(
+      `Выберите дату (${getPeriodLabel(period)} речи):`,
+      Markup.inlineKeyboard(dateButtons.map((b) => [b]))
+    );
   });
 
   bot.action(/^edit:date:(.+)$/, async (ctx) => {
@@ -94,8 +126,12 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     const date = ctx.match[1];
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
     const state = editState.get(userId);
-    if (!state || state.step !== 'date' || state.congregationId === undefined) {
+    if (!state || state.step !== 'date' || state.congregationId === undefined || !state.period) {
       await ctx.answerCbQuery('Выберите общину и дату заново: /edit');
+      return;
+    }
+    if (!isDateInPeriod(date, state.period)) {
+      await ctx.answerCbQuery('Эта дата не входит в выбранную категорию.');
       return;
     }
     const onDate = await talks.listByCongregation(state.congregationId, { fromDate: date, toDate: date });
@@ -110,7 +146,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       )
     );
     await ctx.editMessageText(
-      `Речи на ${date}. Выберите речь:`,
+      `${getDateStatusLabel(date)} речь на ${date}. Выберите речь:`,
       Markup.inlineKeyboard(talkButtons.map((b) => [b]))
     );
   });

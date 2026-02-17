@@ -32,10 +32,40 @@ function formatDateShort(isoDate: string | Date | number): string {
   return `${d} ${month} (${dayName})`;
 }
 
+function getDateStatusLabel(ymd: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return ymd < today ? '🕓 Прошедшая' : '📅 Предстоящая';
+}
+
+type TalkPeriod = 'past' | 'future';
+
+interface DeleteState {
+  step: 'period';
+  congregationId: number;
+  period?: TalkPeriod;
+}
+
+function isDateInPeriod(ymd: string, period: TalkPeriod): boolean {
+  const today = new Date().toISOString().slice(0, 10);
+  return period === 'past' ? ymd < today : ymd >= today;
+}
+
+function getPeriodLabel(period: TalkPeriod): string {
+  return period === 'past' ? 'прошедшие' : 'будущие';
+}
+
+function getPeriodKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🕓 Прошедшие', 'delete:period:past')],
+    [Markup.button.callback('📅 Будущие', 'delete:period:future')],
+  ]);
+}
+
 export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   const talks = talksRepo(db);
   const congRepo = congregationsRepo(db);
   const pendingDelete = new Map<number, number>(); // userId -> talkId
+  const deleteState = new Map<number, DeleteState>();
 
   bot.command('delete', async (ctx) => {
     const userId = ctx.from?.id;
@@ -43,23 +73,10 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
     const ids = ctx.congregationIds ?? [];
     if (ids.length === 0) return;
 
-    const today = new Date().toISOString().slice(0, 10);
-
     if (ids.length === 1) {
       const congregationId = ids[0];
-      const list = await talks.listByCongregation(congregationId, { fromDate: today });
-      const dates = [...new Set(list.map((t) => toYmdString(t.date)))].sort();
-      if (dates.length === 0) {
-        await ctx.reply('Нет предстоящих речей для удаления.');
-        return;
-      }
-      const dateButtons = dates.map((d) =>
-        Markup.button.callback(formatDateShort(d), `delete:date:${congregationId}:${d}`)
-      );
-      await ctx.reply(
-        'Выберите дату речи для удаления:',
-        Markup.inlineKeyboard(dateButtons.map((b) => [b]))
-      );
+      deleteState.set(userId, { step: 'period', congregationId });
+      await ctx.reply('Какие речи хотите удалить?', getPeriodKeyboard());
       return;
     }
 
@@ -78,18 +95,42 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
       await ctx.answerCbQuery('Нет доступа к этой общине.');
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
-    const list = await talks.listByCongregation(congregationId, { fromDate: today });
-    const dates = [...new Set(list.map((t) => toYmdString(t.date)))].sort();
-    if (dates.length === 0) {
-      await ctx.editMessageText('В этой общине нет предстоящих речей для удаления.');
+    deleteState.set(userId, { step: 'period', congregationId });
+    await ctx.editMessageText('Какие речи хотите удалить?', getPeriodKeyboard());
+  });
+
+  bot.action(/^delete:period:(past|future)$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const period = ctx.match[1] as TalkPeriod;
+    const state = deleteState.get(userId);
+    if (!state || state.step !== 'period') {
+      await ctx.answerCbQuery('Выберите общину заново: /delete');
       return;
     }
+    if (!ctx.congregationIds?.includes(state.congregationId)) {
+      await ctx.answerCbQuery('Нет доступа к этой общине.');
+      return;
+    }
+
+    const list = await talks.listByCongregation(state.congregationId);
+    const dates = [...new Set(list.map((t) => toYmdString(t.date)).filter((d) => isDateInPeriod(d, period)))].sort();
+    if (dates.length === 0) {
+      await ctx.editMessageText(`В этой общине нет речей в категории «${getPeriodLabel(period)}».`);
+      deleteState.delete(userId);
+      return;
+    }
+
+    deleteState.set(userId, { ...state, period });
+    const today = new Date().toISOString().slice(0, 10);
     const dateButtons = dates.map((d) =>
-      Markup.button.callback(formatDateShort(d), `delete:date:${congregationId}:${d}`)
+      Markup.button.callback(
+        `${d < today ? '🕓' : '📅'} ${formatDateShort(d)}`,
+        `delete:date:${state.congregationId}:${d}`
+      )
     );
     await ctx.editMessageText(
-      'Выберите дату речи для удаления:',
+      `Выберите дату (${getPeriodLabel(period)} речи):`,
       Markup.inlineKeyboard(dateButtons.map((b) => [b]))
     );
   });
@@ -103,6 +144,15 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
       await ctx.answerCbQuery('Нет доступа.');
       return;
     }
+    const state = deleteState.get(userId);
+    if (!state || state.congregationId !== congregationId || !state.period) {
+      await ctx.answerCbQuery('Сначала выберите категорию: /delete');
+      return;
+    }
+    if (!isDateInPeriod(date, state.period)) {
+      await ctx.answerCbQuery('Эта дата не входит в выбранную категорию.');
+      return;
+    }
     const onDate = await talks.listByCongregation(congregationId, { fromDate: date, toDate: date });
     const talk = onDate[0];
     if (!talk) {
@@ -112,7 +162,7 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
     pendingDelete.set(userId, talk.id);
     const songDisplay = talk.song_number === 0 ? '?' : talk.song_number;
     await ctx.editMessageText(
-      `Удалить речь?\n\n${formatDateShort(date)} — Песня ${songDisplay}, №${talk.talk_number} «${talk.title}»\nДокладчик: ${talk.speaker_name}`,
+      `Удалить речь?\n\n${getDateStatusLabel(date)}: ${formatDateShort(date)} — Песня ${songDisplay}, №${talk.talk_number} «${talk.title}»\nДокладчик: ${talk.speaker_name}`,
       Markup.inlineKeyboard([
         Markup.button.callback('Да, удалить', `delete:confirm:${talk.id}`),
         Markup.button.callback('Отмена', 'delete:cancel'),
@@ -135,12 +185,16 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
     }
     await talks.delete(talkId);
     pendingDelete.delete(userId);
+    deleteState.delete(userId);
     await ctx.editMessageText(`✅ Речь удалена (${formatDateShort(talk.date)}).`);
   });
 
   bot.action('delete:cancel', async (ctx) => {
     const userId = ctx.from?.id;
-    if (userId) pendingDelete.delete(userId);
+    if (userId) {
+      pendingDelete.delete(userId);
+      deleteState.delete(userId);
+    }
     await ctx.editMessageText('Удаление отменено.');
   });
 }
