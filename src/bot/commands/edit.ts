@@ -56,6 +56,32 @@ function getPeriodKeyboard() {
   ]);
 }
 
+function getEditFieldKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('Дата', 'edit:field:date'),
+      Markup.button.callback('Песня', 'edit:field:song'),
+      Markup.button.callback('№ речи', 'edit:field:talk_number'),
+    ],
+    [
+      Markup.button.callback('Докладчик', 'edit:field:speaker_name'),
+      Markup.button.callback('Телефон', 'edit:field:speaker_phone'),
+    ],
+    [Markup.button.callback('✅ Готово', 'edit:done')],
+  ]);
+}
+
+function formatEditTalkCard(congregationName: string, talk: { date: string; song_number: number; talk_number: number; title: string; speaker_name: string; speaker_phone: string }): string {
+  return (
+    `Редактирование речи (${congregationName}):\n` +
+    `Дата: ${talk.date}\n` +
+    `Песня: ${talk.song_number === 0 ? '?' : talk.song_number}, Речь: №${talk.talk_number}\n` +
+    `Название: ${talk.title}\n` +
+    `Докладчик: ${talk.speaker_name}, ${talk.speaker_phone}\n\n` +
+    'Что изменить?'
+  );
+}
+
 export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   const talks = talksRepo(db);
   const congRepo = congregationsRepo(db);
@@ -160,26 +186,17 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       await ctx.answerCbQuery('Нет доступа к этой речи.');
       return;
     }
-    editState.set(userId, { step: 'field', talkId });
+    const currentState = editState.get(userId);
+    editState.set(userId, {
+      step: 'field',
+      talkId,
+      congregationId: talk.congregation_id,
+      period: currentState?.period,
+    });
     const cong = await congRepo.getById(talk.congregation_id);
     await ctx.editMessageText(
-      `Редактирование речи (${cong?.name ?? ''}):\n` +
-        `Дата: ${talk.date}\n` +
-        `Песня: ${talk.song_number === 0 ? '?' : talk.song_number}, Речь: №${talk.talk_number}\n` +
-        `Название: ${talk.title}\n` +
-        `Докладчик: ${talk.speaker_name}, ${talk.speaker_phone}\n\n` +
-        'Что изменить? (или /cancel)',
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback('Дата', 'edit:field:date'),
-          Markup.button.callback('Песня', 'edit:field:song'),
-          Markup.button.callback('№ речи', 'edit:field:talk_number'),
-        ],
-        [
-          Markup.button.callback('Докладчик', 'edit:field:speaker_name'),
-          Markup.button.callback('Телефон', 'edit:field:speaker_phone'),
-        ],
-      ])
+      `${formatEditTalkCard(cong?.name ?? '', talk)} (или /cancel)`,
+      getEditFieldKeyboard()
     );
   });
 
@@ -206,6 +223,18 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     state.step = field as EditStep;
     editState.set(userId, state);
     await ctx.editMessageText(fieldPrompts[field] ?? 'Введите новое значение:');
+  });
+
+  bot.action('edit:done', async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const state = editState.get(userId);
+    if (!state || state.step !== 'field' || state.talkId === undefined) {
+      await ctx.answerCbQuery('Сессия неактивна. Выполните /edit заново.');
+      return;
+    }
+    editState.delete(userId);
+    await ctx.editMessageText('✅ Редактирование завершено.');
   });
 
   bot.on('message', async (ctx, next) => {
@@ -239,6 +268,11 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
 
     if (state.step === 'field') {
       const field = text.toLowerCase();
+      if (field === 'готово') {
+        editState.delete(userId);
+        await ctx.reply('✅ Редактирование завершено.');
+        return;
+      }
       if (['date', 'song', 'talk_number', 'speaker_name', 'speaker_phone'].includes(field)) {
         state.step = field as EditStep;
         editState.set(userId, state);
@@ -287,7 +321,19 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     else if (state.step === 'speaker_phone') update.speaker_phone = text;
 
     await talks.update(state.talkId, update);
-    editState.delete(userId);
-    await ctx.reply(`✅ Речь обновлена.`);
+    const updatedTalk = await talks.getById(state.talkId);
+    if (!updatedTalk || !ctx.congregationIds?.includes(updatedTalk.congregation_id)) {
+      editState.delete(userId);
+      await ctx.reply('Речь обновлена, но сессия завершена. Запустите /edit при необходимости.');
+      return;
+    }
+
+    const cong = await congRepo.getById(updatedTalk.congregation_id);
+    state.step = 'field';
+    editState.set(userId, state);
+    await ctx.reply(
+      `✅ Поле обновлено.\n\n${formatEditTalkCard(cong?.name ?? '', updatedTalk)} (или /cancel)`,
+      getEditFieldKeyboard()
+    );
   });
 }
