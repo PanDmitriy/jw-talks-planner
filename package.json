@@ -8,13 +8,20 @@
     "start": "node dist/index.js",
     "build": "tsc"
   },
-  "keywords": ["telegram", "bot", "telegraf", "postgres", "jw"],
+  "keywords": [
+    "telegram",
+    "bot",
+    "telegraf",
+    "postgres",
+    "jw"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "dotenv": "^16.4.5",
     "pg": "^8.13.1",
-    "telegraf": "^4.16.3"
+    "telegraf": "^4.16.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
