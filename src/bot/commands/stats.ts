@@ -94,6 +94,14 @@ async function sendStatsForCongregation(
   congregationId: number,
   isEdit = false
 ): Promise<void> {
+  const pluralizeTimes = (count: number): string => {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) return `${count} раз`;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} раза`;
+    return `${count} раз`;
+  };
+
   const escapeHtml = (value: string): string =>
     value
       .replace(/&/g, '&amp;')
@@ -105,21 +113,20 @@ async function sendStatsForCongregation(
   const safeName = escapeHtml(name);
 
   const talkStats = await getTalkStats(db, congregationId);
-  let msg = `📊 Статистика\n${safeName}\n\n`;
+  let msg = `📊 <b>Статистика речей</b>\n🏛 <b>Община:</b> ${safeName}\n\n`;
 
   if (talkStats.length === 0) {
-    msg += 'Речей в истории пока нет.\n';
+    msg += 'Пока нет данных по речам.\n';
   } else {
-    msg += `Всего речей в истории: ${talkStats.length}\n`;
-    msg += 'Порядок: по номеру речи\n\n';
+    msg += `🧾 <b>Всего тем в истории:</b> ${talkStats.length}\n`;
+    msg += `🔢 <b>Порядок:</b> по номеру речи\n\n`;
 
     for (const t of talkStats) {
-      const countText = `${t.total_count} раз`;
-      const lastDateText = t.last_date ? `<b>${escapeHtml(formatDateRu(t.last_date))}</b>` : '<b>нет даты</b>';
-      const speakerText = t.last_speaker ? escapeHtml(t.last_speaker) : 'не указан';
-      const titleText = escapeHtml(t.title);
-      msg += `• <b>№${t.talk_number}</b> · ${countText} · ${lastDateText} · ${speakerText}\n`;
-      msg += `  ${titleText}\n`;
+      const countText = pluralizeTimes(t.total_count);
+      const lastDateText = t.last_date ? escapeHtml(formatDateRu(t.last_date)) : 'нет данных';
+      msg += `<b>№${t.talk_number}</b> • <b>${countText}</b>\n`;
+      msg += `🗓 Последняя дата: <b>${lastDateText}</b>\n`;
+      msg += '\n';
     }
   }
 
