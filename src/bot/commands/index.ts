@@ -13,6 +13,7 @@ import { registerDeleteCommand } from './delete';
 import { registerStatsCommand } from './stats';
 import { registerCongregationCommand } from './congregation';
 import { registerPlansCommand } from './plans';
+import { registerCheckCommand } from './check';
 
 export function registerAllCommands(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   registerStartCommand(bot, db);
@@ -23,4 +24,5 @@ export function registerAllCommands(bot: Telegraf<AuthContext>, db: DatabaseInst
   registerStatsCommand(bot, db);
   registerCongregationCommand(bot, db);
   registerPlansCommand(bot, db);
+  registerCheckCommand(bot, db);
 }

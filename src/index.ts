@@ -16,6 +16,7 @@ const BOT_COMMANDS = [
   { command: 'start', description: 'Приветствие и справка' },
   { command: 'help', description: 'Справка по командам' },
   { command: 'list', description: 'Расписание предстоящих речей' },
+  { command: 'check', description: 'Проверить, была ли речь и когда' },
   { command: 'add', description: 'Добавить речь' },
   { command: 'edit', description: 'Изменить речь (выбор по дате)' },
   { command: 'delete', description: 'Удалить речь (выбор по дате)' },

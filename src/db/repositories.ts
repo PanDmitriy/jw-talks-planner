@@ -356,6 +356,27 @@ export function talksRepo(db: DatabaseInstance) {
       );
       return result.rows as Talk[];
     },
+    async listPastByNumber(congregationId: number, talkNumber: number): Promise<Talk[]> {
+      const today = new Date().toISOString().slice(0, 10);
+      const result = await db.query(
+        `SELECT
+           id,
+           congregation_id,
+           date::text as date,
+           song_number,
+           talk_number,
+           title,
+           speaker_name,
+           speaker_phone,
+           created_at::text as created_at,
+           updated_at::text as updated_at
+         FROM talks
+         WHERE congregation_id = $1 AND talk_number = $2 AND date <= $3
+         ORDER BY date DESC`,
+        [congregationId, talkNumber, today]
+      );
+      return result.rows as Talk[];
+    },
   };
 }
 
