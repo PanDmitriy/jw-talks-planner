@@ -11,6 +11,39 @@ import { requireAuth, registerGrantCommand, loggingMiddleware } from './bot/midd
 import { registerAllCommands } from './bot/commands';
 import { startScheduler } from './scheduler/notifications';
 
+// Список команд для меню бота (кнопка «/» в Telegram)
+const BOT_COMMANDS = [
+  { command: 'start', description: 'Приветствие и справка' },
+  { command: 'help', description: 'Справка по командам' },
+  { command: 'list', description: 'Расписание предстоящих речей' },
+  { command: 'add', description: 'Добавить речь' },
+  { command: 'edit', description: 'Изменить речь (выбор по дате)' },
+  { command: 'delete', description: 'Удалить речь (выбор по дате)' },
+  { command: 'plans', description: 'Список речей (номер + название)' },
+  { command: 'stats', description: 'Статистика по речам и докладчикам' },
+  { command: 'rename_congregation', description: 'Переименовать общину' },
+  { command: 'grant', description: 'Выдать доступ (админ)' },
+  { command: 'cancel', description: 'Отменить текущую операцию' },
+] as const;
+
+async function registerBotCommands(bot: Telegraf<AuthContext>): Promise<void> {
+  const scopes = [
+    undefined, // default scope
+    { scope: { type: 'all_private_chats' as const } },
+    { scope: { type: 'all_group_chats' as const } },
+  ];
+  const languages: Array<string | undefined> = [undefined, 'ru'];
+
+  for (const scopeParams of scopes) {
+    for (const languageCode of languages) {
+      await bot.telegram.setMyCommands(
+        BOT_COMMANDS,
+        languageCode ? { ...(scopeParams ?? {}), language_code: languageCode } : scopeParams
+      );
+    }
+  }
+}
+
 async function main() {
   const botToken = process.env.BOT_TOKEN;
   if (typeof botToken !== 'string' || botToken.trim() === '') {
@@ -49,30 +82,15 @@ async function main() {
   const schedulerInterval = 60 * 60 * 1000;
   const schedulerTimer = startScheduler(bot, db, schedulerInterval);
 
-  // Список команд для меню бота (кнопка «/» в Telegram)
-  const BOT_COMMANDS = [
-    { command: 'start', description: 'Приветствие и справка' },
-    { command: 'help', description: 'Справка по командам' },
-    { command: 'list', description: 'Расписание предстоящих речей' },
-    { command: 'add', description: 'Добавить речь' },
-    { command: 'edit', description: 'Изменить речь (выбор по дате)' },
-    { command: 'delete', description: 'Удалить речь (выбор по дате)' },
-    { command: 'plans', description: 'Список речей (номер + название)' },
-    { command: 'stats', description: 'Статистика по речам и докладчикам' },
-    { command: 'rename_congregation', description: 'Переименовать общину' },
-    { command: 'grant', description: 'Выдать доступ (админ)' },
-  ];
-
-  // Запуск
-  await bot.launch();
   try {
-    await bot.telegram.setMyCommands(BOT_COMMANDS);
-    await bot.telegram.setMyCommands(BOT_COMMANDS, { language_code: 'ru' });
-    console.log('\nБот запущен. Команды зарегистрированы в меню. Для остановки: Ctrl+C\n');
+    await registerBotCommands(bot);
+    console.log('Команды бота зарегистрированы в Telegram.');
   } catch (e) {
     console.warn('Не удалось обновить меню команд в Telegram:', e);
-    console.log('\nБот запущен. Для остановки: Ctrl+C\n');
   }
+  // Запуск
+  await bot.launch();
+  console.log('\nБот запущен. Для остановки: Ctrl+C\n');
 
   function shutdown(signal: string) {
     clearInterval(schedulerTimer);
