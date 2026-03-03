@@ -32,6 +32,11 @@ function isDateInPeriod(ymd: string, period: TalkPeriod): boolean {
   return period === 'past' ? ymd < today : ymd >= today;
 }
 
+function getUtcDayOfWeek(ymd: string): number {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
 function getPeriodLabel(period: TalkPeriod): string {
   return period === 'past' ? 'прошедшие' : 'будущие';
 }
@@ -96,7 +101,13 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
     }
 
     const list = await talks.listByCongregation(state.congregationId);
-    const dates = [...new Set(list.map((t) => toYmdString(t.date)).filter((d) => isDateInPeriod(d, period)))].sort();
+    const congregation = await congRepo.getById(state.congregationId);
+    const meetingWeekday = congregation?.meeting_weekday ?? 0;
+    const dates = [...new Set(
+      list
+        .map((t) => toYmdString(t.date))
+        .filter((d) => isDateInPeriod(d, period) && getUtcDayOfWeek(d) === meetingWeekday)
+    )].sort();
     if (dates.length === 0) {
       await ctx.editMessageText(`В этой общине нет речей в категории «${getPeriodLabel(period)}».`);
       deleteState.delete(userId);
@@ -112,7 +123,8 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
       )
     );
     await ctx.editMessageText(
-      `Выберите дату (${getPeriodLabel(period)} речи):`,
+      `Выберите дату (${getPeriodLabel(period)} речи).\n` +
+        'Показываются только даты дня встречи вашего собрания:',
       Markup.inlineKeyboard(dateButtons.map((b) => [b]))
     );
   });
@@ -133,6 +145,12 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
     }
     if (!isDateInPeriod(date, state.period)) {
       await ctx.answerCbQuery('Эта дата не входит в выбранную категорию.');
+      return;
+    }
+    const congregation = await congRepo.getById(congregationId);
+    const meetingWeekday = congregation?.meeting_weekday ?? 0;
+    if (getUtcDayOfWeek(date) !== meetingWeekday) {
+      await ctx.answerCbQuery('Эта дата не относится к дню встречи собрания.');
       return;
     }
     const onDate = await talks.listByCongregation(congregationId, { fromDate: date, toDate: date });

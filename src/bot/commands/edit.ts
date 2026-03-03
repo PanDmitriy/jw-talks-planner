@@ -6,9 +6,17 @@ import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
-import { talksRepo, congregationsRepo, getTitleForTalk } from '../../db';
+import {
+  talksRepo,
+  congregationsRepo,
+  getTitleForTalk,
+  scheduleExceptionsRepo,
+  TalkDateValidationError,
+  TalkDateBlockedByEventError,
+} from '../../db';
 import type { TalkInput } from '../../db/types';
 import { formatDateRu, parseUserDateToYmd } from '../../utils/date';
+import { formatWeekdayRu } from '../utils/meetingSchedule';
 
 type EditStep =
   | 'congregation'
@@ -39,6 +47,11 @@ function getDateStatusLabel(ymd: string): string {
 function isDateInPeriod(ymd: string, period: TalkPeriod): boolean {
   const today = new Date().toISOString().slice(0, 10);
   return period === 'past' ? ymd < today : ymd >= today;
+}
+
+function getUtcDayOfWeek(ymd: string): number {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
 function getPeriodLabel(period: TalkPeriod): string {
@@ -81,6 +94,14 @@ function formatEditTalkCard(congregationName: string, talk: { date: string; song
 export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   const talks = talksRepo(db);
   const congRepo = congregationsRepo(db);
+  const exceptionsRepo = scheduleExceptionsRepo(db);
+  const BLOCKING_TYPES = new Set(['district_congress', 'memorial']);
+
+  function getExceptionTypeLabel(type: string): string {
+    if (type === 'district_congress') return 'Районный конгресс';
+    if (type === 'memorial') return 'Вечеря воспоминания';
+    return 'Посещение РС';
+  }
 
   bot.command('edit', async (ctx) => {
     const userId = ctx.from?.id;
@@ -125,7 +146,13 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     }
 
     const list = await talks.listByCongregation(state.congregationId);
-    const dates = [...new Set(list.map((t) => t.date).filter((d) => isDateInPeriod(d, period)))].sort();
+    const congregation = await congRepo.getById(state.congregationId);
+    const meetingWeekday = congregation?.meeting_weekday ?? 0;
+    const dates = [...new Set(
+      list
+        .map((t) => t.date)
+        .filter((d) => isDateInPeriod(d, period) && getUtcDayOfWeek(d) === meetingWeekday)
+    )].sort();
     if (dates.length === 0) {
       await ctx.editMessageText(`В этой общине нет речей в категории «${getPeriodLabel(period)}».`);
       editState.delete(userId);
@@ -140,7 +167,8 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       )
     );
     await ctx.editMessageText(
-      `Выберите дату (${getPeriodLabel(period)} речи):`,
+      `Выберите дату (${getPeriodLabel(period)} речи).\n` +
+        'Показываются только даты дня встречи вашего собрания:',
       Markup.inlineKeyboard(dateButtons.map((b) => [b]))
     );
   });
@@ -157,6 +185,12 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     }
     if (!isDateInPeriod(date, state.period)) {
       await ctx.answerCbQuery('Эта дата не входит в выбранную категорию.');
+      return;
+    }
+    const congregation = await congRepo.getById(state.congregationId);
+    const meetingWeekday = congregation?.meeting_weekday ?? 0;
+    if (getUtcDayOfWeek(date) !== meetingWeekday) {
+      await ctx.answerCbQuery('Эта дата не относится к дню встречи собрания.');
       return;
     }
     const onDate = await talks.listByCongregation(state.congregationId, { fromDate: date, toDate: date });
@@ -202,7 +236,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
   const fieldPrompts: Record<string, string> = {
     date: 'Введите новую дату (ДД.ММ.ГГГГ):',
     song: 'Введите новый номер песни (1–200 или ? если ещё не известна):',
-    talk_number: 'Введите новый номер речи (название подставится из списка):',
+    talk_number: 'Введите новый номер речи (название подставится из списка, кроме уикенда РС):',
     speaker_name: 'Введите новое имя докладчика:',
     speaker_phone: 'Введите новый номер телефона:',
   };
@@ -316,12 +350,34 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     else if (state.step === 'song') update.song_number = value as number;
     else if (state.step === 'talk_number') {
       update.talk_number = value as number;
-      const newTitle = await getTitleForTalk(db, value as number);
-      if (newTitle) update.title = newTitle;
+      const events = await exceptionsRepo.getWeekendEvents(talk.congregation_id, talk.date);
+      const isRsVisit = events.some((event) => event.exception_type === 'rs_visit');
+      if (!isRsVisit) {
+        const newTitle = await getTitleForTalk(db, value as number);
+        if (newTitle) update.title = newTitle;
+      }
     } else if (state.step === 'speaker_name') update.speaker_name = text;
     else if (state.step === 'speaker_phone') update.speaker_phone = text;
 
-    await talks.update(state.talkId, update);
+    try {
+      await talks.update(state.talkId, update);
+    } catch (error) {
+      if (error instanceof TalkDateValidationError) {
+        await ctx.reply(
+          `Эта дата не совпадает с днем встречи собрания. ` +
+            `Выберите ${formatWeekdayRu(error.expectedWeekday)}.`
+        );
+        return;
+      }
+      if (error instanceof TalkDateBlockedByEventError) {
+        await ctx.reply(
+          `Этот уикенд занят событием: ${getExceptionTypeLabel(error.exceptionType)}. ` +
+            'Публичную речь на такую дату планировать нельзя.'
+        );
+        return;
+      }
+      throw error;
+    }
     const updatedTalk = await talks.getById(state.talkId);
     if (!updatedTalk || !ctx.congregationIds?.includes(updatedTalk.congregation_id)) {
       editState.delete(userId);

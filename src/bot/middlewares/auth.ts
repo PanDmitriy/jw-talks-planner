@@ -5,6 +5,7 @@
 import { Context, Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import { userCongregationsRepo, congregationsRepo } from '../../db';
+import { normalizeMeetingTime, parseWeekdayToken, formatWeekdayRu } from '../utils/meetingSchedule';
 
 /** Расширяем контекст: список ID общин, к которым есть доступ у пользователя */
 export interface AuthContext extends Context {
@@ -82,39 +83,64 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
     const parts = text.trim().split(/\s+/).slice(1); // убираем /grant
     if (parts.length < 1) {
       await ctx.reply(
-        'Использование: /grant @username [Название общины]\nПример: /grant @ivan Община Центральная'
+        'Использование: /grant @username [Название собрания] [день недели] [HH:MM]\n' +
+          'Пример: /grant @ivan Центральное воскресенье 10:00'
       );
       return;
     }
     const usernameRaw = parts[0];
     const username = usernameRaw.startsWith('@') ? usernameRaw.slice(1) : usernameRaw;
-    const congregationName = parts.slice(1).join(' ').trim();
+    const tail = parts.slice(1);
+    let meetingWeekday: number | null = null;
+    let meetingTime: string | null = null;
+    if (tail.length >= 2) {
+      const maybeWeekday = parseWeekdayToken(tail[tail.length - 2]);
+      const maybeTime = normalizeMeetingTime(tail[tail.length - 1]);
+      if (maybeWeekday !== null && maybeTime !== null) {
+        if (maybeWeekday !== 0 && maybeWeekday !== 6) {
+          await ctx.reply('Для публичных речей укажите выходной день: суббота или воскресенье.');
+          return;
+        }
+        meetingWeekday = maybeWeekday;
+        meetingTime = maybeTime;
+        tail.splice(tail.length - 2, 2);
+      }
+    }
+    const congregationName = tail.join(' ').trim();
 
     const congregations = await congRepo.listAll();
     let congregationId: number;
     if (congregationName) {
       let cong = congregations.find((c) => c.name.toLowerCase() === congregationName.toLowerCase());
       if (!cong) {
-        congregationId = await congRepo.create(congregationName);
+        congregationId = await congRepo.create(congregationName, {
+          meeting_weekday: meetingWeekday ?? 0,
+          meeting_time: meetingTime ?? '10:00',
+        });
         cong = await congRepo.getById(congregationId);
       } else {
         congregationId = cong.id;
       }
     } else {
       if (congregations.length === 0) {
-        // Первый grant без названия — создаём общину по умолчанию
-        const defaultName = process.env.DEFAULT_CONGREGATION_NAME || 'Община 1';
-        congregationId = await congRepo.create(defaultName);
+        // Первый grant без названия — создаём собрание по умолчанию
+        const defaultName = process.env.DEFAULT_CONGREGATION_NAME || 'Собрание 1';
+        congregationId = await congRepo.create(defaultName, {
+          meeting_weekday: meetingWeekday ?? 0,
+          meeting_time: meetingTime ?? '10:00',
+        });
         const cong = await congRepo.getById(congregationId);
         getPendingGrants().add(username, congregationId);
+        const scheduleInfo = ` (${formatWeekdayRu(cong?.meeting_weekday ?? 0)}, ${(cong?.meeting_time ?? '10:00').slice(0, 5)})`;
         await ctx.reply(
-          `Община «${cong?.name ?? defaultName}» создана автоматически. Доступ для @${username} будет выдан, когда пользователь напишет боту /start. Попросите его написать боту.`
+          `Собрание «${cong?.name ?? defaultName}» создано автоматически${scheduleInfo}. ` +
+            `Доступ для @${username} будет выдан, когда пользователь напишет боту /start.`
         );
         return;
       }
       if (congregations.length > 1) {
         await ctx.reply(
-          `Укажите общину: /grant @${username} НазваниеОбщины\nДоступные: ${congregations.map((c) => c.name).join(', ')}`
+          `Укажите собрание: /grant @${username} НазваниеСобрания\nДоступные: ${congregations.map((c) => c.name).join(', ')}`
         );
         return;
       }
@@ -139,8 +165,15 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
     // Сделаю проще: при /grant пишем "Попросите пользователя @username написать боту команду /start. После этого повторите /grant @username Община — тогда доступ будет привязан к аккаунту." И храним pending: username -> congregation_id. При /start смотрим username, если есть pending — добавляем user_congregations(user_id, username, congregation_id) и удаляем pending.
     getPendingGrants().add(username, congregationId);
     const cong = await congRepo.getById(congregationId);
+    const scheduleInfo = cong
+      ? ` (${formatWeekdayRu(cong.meeting_weekday)}, ${cong.meeting_time.slice(0, 5)})`
+      : '';
+    const scheduleHint =
+      meetingWeekday !== null && meetingTime !== null
+        ? ''
+        : '\nДля нового собрания можно сразу указать день и время: /grant @username Название воскресенье 10:00';
     await ctx.reply(
-      `Доступ для @${username} к общине «${cong?.name}» будет выдан, когда пользователь напишет боту /start. Попросите его написать боту.`
+      `Доступ для @${username} к собранию «${cong?.name}»${scheduleInfo} будет выдан, когда пользователь напишет боту /start.${scheduleHint}`
     );
   });
 }

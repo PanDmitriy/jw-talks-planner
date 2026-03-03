@@ -1,5 +1,5 @@
 /**
- * Команда /rename_congregation — переименование общины
+ * Команда /rename_congregation — переименование собрания
  */
 
 import type { Telegraf } from 'telegraf';
@@ -8,7 +8,7 @@ import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
 import { congregationsRepo } from '../../db';
 
-/** Состояние пошагового переименования: выбор общины → ввод нового названия */
+/** Состояние пошагового переименования: выбор собрания → ввод нового названия */
 const renameState = new Map<number, { congregationId: number }>();
 
 export function registerCongregationCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
@@ -22,7 +22,7 @@ export function registerCongregationCommand(bot: Telegraf<AuthContext>, db: Data
 
     const text = (ctx.message as { text?: string })?.text?.trim() ?? '';
     const args = text.split(/\s+/).slice(1);
-    // Вариант: /rename_congregation "Старое" "Новое" или /rename_congregation Старое Новое (без пробелов в названиях)
+      // Вариант: /rename_congregation "Старое" "Новое" или /rename_congregation Старое Новое (без пробелов в названиях)
     if (args.length >= 2) {
       const oldName = args[0].replace(/^"|"$/g, '');
       const newName = args.slice(1).join(' ').replace(/^"|"$/g, '');
@@ -33,17 +33,17 @@ export function registerCongregationCommand(bot: Telegraf<AuthContext>, db: Data
       if (!cong) {
         const names = (await Promise.all(ids.map((id) => congRepo.getById(id)))).map((c) => c?.name).join(', ');
         await ctx.reply(
-          `Община «${oldName}» не найдена или у вас нет к ней доступа. Ваши общины: ${names}`
+          `Собрание «${oldName}» не найдено или у вас нет к нему доступа. Ваши собрания: ${names}`
         );
         return;
       }
       if (!newName.trim()) {
-        await ctx.reply('Введите новое название общины.');
+        await ctx.reply('Введите новое название собрания.');
         return;
       }
       await congRepo.updateName(cong.id, newName.trim());
       renameState.delete(userId);
-      await ctx.reply(`✅ Община переименована: «${cong.name}» → «${newName.trim()}».`);
+      await ctx.reply(`✅ Собрание переименовано: «${cong.name}» → «${newName.trim()}».`);
       return;
     }
 
@@ -51,17 +51,17 @@ export function registerCongregationCommand(bot: Telegraf<AuthContext>, db: Data
       renameState.set(userId, { congregationId: ids[0] });
       const cong = await congRepo.getById(ids[0]);
       await ctx.reply(
-        `Текущее название: «${cong?.name ?? 'Община'}». Введите новое название общины (или /cancel для отмены):`
+        `Текущее название: «${cong?.name ?? 'Собрание'}». Введите новое название собрания (или /cancel для отмены):`
       );
       return;
     }
 
-    // Несколько общин — выбор кнопкой
+    // Несколько собраний — выбор кнопкой
     const buttons = await Promise.all(ids.map(async (id) => {
       const c = await congRepo.getById(id);
       return Markup.button.callback(c?.name ?? `Община ${id}`, `rename_cong:${id}`);
     }));
-    await ctx.reply('Выберите общину:', Markup.inlineKeyboard(buttons));
+    await ctx.reply('Выберите собрание:', Markup.inlineKeyboard(buttons));
   });
 
   bot.action(/^rename_cong:(\d+)$/, async (ctx) => {
@@ -100,6 +100,6 @@ export function registerCongregationCommand(bot: Telegraf<AuthContext>, db: Data
     }
     await congRepo.updateName(state.congregationId, text);
     renameState.delete(userId);
-    await ctx.reply(`✅ Община переименована: «${cong.name}» → «${text}».`);
+    await ctx.reply(`✅ Собрание переименовано: «${cong.name}» → «${text}».`);
   });
 }

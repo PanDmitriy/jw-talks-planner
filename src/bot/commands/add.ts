@@ -6,9 +6,17 @@ import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
-import { talksRepo, congregationsRepo, getTitleForTalk } from '../../db';
+import {
+  talksRepo,
+  congregationsRepo,
+  getTitleForTalk,
+  scheduleExceptionsRepo,
+  TalkDateValidationError,
+  TalkDateBlockedByEventError,
+} from '../../db';
 import type { TalkInput } from '../../db/types';
 import { formatDateRu, parseUserDateToYmd } from '../../utils/date';
+import { formatWeekdayRu } from '../utils/meetingSchedule';
 
 type AddStep =
   | 'congregation'
@@ -28,6 +36,8 @@ interface AddTalkState {
   title?: string;
   speaker_name?: string;
   speaker_phone?: string;
+  isRsVisit?: boolean;
+  dateCursorFrom?: string;
 }
 
 const wizardState = new Map<number, AddTalkState>();
@@ -35,6 +45,115 @@ const wizardState = new Map<number, AddTalkState>();
 export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   const talks = talksRepo(db);
   const congRepo = congregationsRepo(db);
+  const exceptionsRepo = scheduleExceptionsRepo(db);
+
+  const BLOCKING_TYPES = new Set(['district_congress', 'memorial']);
+
+  function getExceptionTypeLabel(type: string): string {
+    if (type === 'district_congress') return 'Районный конгресс';
+    if (type === 'memorial') return 'Вечеря воспоминания';
+    return 'Посещение РС';
+  }
+
+  function getUtcDayOfWeek(ymd: string): number {
+    const [y, m, d] = ymd.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  }
+
+  function addDays(ymd: string, days: number): string {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + days);
+    return dt.toISOString().slice(0, 10);
+  }
+
+  async function validateSelectedDate(
+    congregationId: number,
+    ymd: string
+  ): Promise<{ ok: true; isRsVisit: boolean } | { ok: false; reason: string }> {
+    const congregation = await congRepo.getById(congregationId);
+    if (!congregation) return { ok: false, reason: 'Собрание не найдено.' };
+    const weekday = getUtcDayOfWeek(ymd);
+    if (weekday !== congregation.meeting_weekday) {
+      return {
+        ok: false,
+        reason: `Для этого собрания встреча проходит по ${formatWeekdayRu(congregation.meeting_weekday)}.`,
+      };
+    }
+    const events = await exceptionsRepo.getWeekendEvents(congregationId, ymd);
+    const blocking = events.find((e) => BLOCKING_TYPES.has(e.exception_type));
+    if (blocking) {
+      return {
+        ok: false,
+        reason: `Этот уикенд отмечен как «${getExceptionTypeLabel(blocking.exception_type)}», публичную речь планировать нельзя.`,
+      };
+    }
+    const existing = await talks.listByCongregation(congregationId, { fromDate: ymd, toDate: ymd });
+    if (existing.length > 0) {
+      return { ok: false, reason: `На ${formatDateRu(ymd)} уже запланирована публичная речь.` };
+    }
+    const isRsVisit = events.some((e) => e.exception_type === 'rs_visit');
+    return { ok: true, isRsVisit };
+  }
+
+  async function getNextAvailableDates(
+    congregationId: number,
+    fromDate: string,
+    limit = 8
+  ): Promise<{ dates: string[]; nextCursorFrom: string | null }> {
+    const congregation = await congRepo.getById(congregationId);
+    if (!congregation) return { dates: [], nextCursorFrom: null };
+    const out: string[] = [];
+    let cursor = fromDate;
+    let scannedDays = 0;
+    while (scannedDays < 730 && out.length < limit + 1) {
+      if (getUtcDayOfWeek(cursor) === congregation.meeting_weekday) {
+        const validated = await validateSelectedDate(congregationId, cursor);
+        if (validated.ok) out.push(cursor);
+      }
+      cursor = addDays(cursor, 1);
+      scannedDays += 1;
+    }
+    if (out.length <= limit) return { dates: out, nextCursorFrom: null };
+    return { dates: out.slice(0, limit), nextCursorFrom: addDays(out[limit - 1], 1) };
+  }
+
+  async function askDateSelection(
+    ctx: AuthContext,
+    userId: number,
+    congregationId: number,
+    options?: { fromDate?: string; replaceMessage?: boolean }
+  ): Promise<void> {
+    const congregation = await congRepo.getById(congregationId);
+    const fromDate = options?.fromDate ?? new Date().toISOString().slice(0, 10);
+    const { dates: freeDates, nextCursorFrom } = await getNextAvailableDates(congregationId, fromDate, 8);
+    if (freeDates.length === 0) {
+      const emptyText =
+        `Не найдено свободных дат на ближайший период для собрания ${congregation?.name ?? congregationId}. ` +
+        'Проверьте /exceptions или измените день встречи через /meeting_schedule.';
+      if (options?.replaceMessage) await ctx.editMessageText(emptyText);
+      else await ctx.reply(emptyText);
+      wizardState.delete(userId);
+      return;
+    }
+    const buttons = freeDates.map((d) => [Markup.button.callback(formatDateRu(d), `add:date:${d}`)]);
+    if (nextCursorFrom) {
+      buttons.push([Markup.button.callback('Показать еще даты', `add:dates:more:${nextCursorFrom}`)]);
+    }
+    wizardState.set(userId, {
+      step: 'date',
+      congregationId,
+      dateCursorFrom: nextCursorFrom ?? undefined,
+    });
+    const text =
+      `Шаг 1 из 7. Собрание: ${congregation?.name ?? congregationId}.\n` +
+      `Выберите свободную дату встречи (${formatWeekdayRu(congregation?.meeting_weekday ?? 0)}):`;
+    if (options?.replaceMessage) {
+      await ctx.editMessageText(text, Markup.inlineKeyboard(buttons));
+    } else {
+      await ctx.reply(text, Markup.inlineKeyboard(buttons));
+    }
+  }
 
   const addHandler = async (ctx: AuthContext) => {
     const userId = ctx.from?.id;
@@ -43,11 +162,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
     if (ids.length === 0) return;
 
     if (ids.length === 1) {
-      wizardState.set(userId, { step: 'date', congregationId: ids[0] });
-      const cong = await congRepo.getById(ids[0]);
-      await ctx.reply(
-        `Шаг 1 из 7. Община: ${cong?.name ?? ids[0]}.\n\nВведите дату речи (ДД.ММ.ГГГГ), например 10.02.2025.\nОтмена: /cancel`
-      );
+      await askDateSelection(ctx, userId, ids[0]);
       return;
     }
     wizardState.set(userId, { step: 'congregation' });
@@ -69,11 +184,47 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       await ctx.answerCbQuery('Нет доступа.');
       return;
     }
-    wizardState.set(userId, { step: 'date', congregationId });
-    const cong = await congRepo.getById(congregationId);
-    await ctx.editMessageText(
-      `Шаг 1 из 7. Община: ${cong?.name ?? congregationId}.\n\nВведите дату речи (ДД.ММ.ГГГГ), например 10.02.2025.\nОтмена: /cancel`
-    );
+    await ctx.answerCbQuery();
+    await askDateSelection(ctx, userId, congregationId);
+  });
+
+  bot.action(/^add:date:(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const state = wizardState.get(userId);
+    if (!state || state.step !== 'date' || state.congregationId === undefined) {
+      await ctx.answerCbQuery('Начните заново: /add');
+      return;
+    }
+    const ymd = ctx.match[1];
+    const validated = await validateSelectedDate(state.congregationId, ymd);
+    if (!validated.ok) {
+      await ctx.answerCbQuery('Дата недоступна');
+      await ctx.reply(validated.reason);
+      await askDateSelection(ctx, userId, state.congregationId);
+      return;
+    }
+    state.date = ymd;
+    state.isRsVisit = validated.isRsVisit;
+    state.step = 'song';
+    wizardState.set(userId, state);
+    await ctx.answerCbQuery();
+    await ctx.reply('Шаг 2 из 7. Введите номер песни (1–200) или ? если песня ещё не известна:');
+  });
+
+  bot.action(/^add:dates:more:(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const state = wizardState.get(userId);
+    if (!state || state.step !== 'date' || state.congregationId === undefined) {
+      await ctx.answerCbQuery('Начните заново: /add');
+      return;
+    }
+    await ctx.answerCbQuery();
+    await askDateSelection(ctx, userId, state.congregationId, {
+      fromDate: ctx.match[1],
+      replaceMessage: true,
+    });
   });
 
   bot.on('message', async (ctx, next) => {
@@ -100,11 +251,22 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
     if (state.step === 'date') {
       const ymd = parseUserDateToYmd(text);
       if (!ymd) {
-        await ctx.reply('Неверный формат даты. Введите ДД.ММ.ГГГГ (например 10.02.2025) или /cancel.');
+        await ctx.reply('Выберите дату кнопкой выше или введите ДД.ММ.ГГГГ (например 10.02.2025), /cancel.');
+        return;
+      }
+      if (state.congregationId === undefined) {
+        await ctx.reply('Собрание не выбрано. Начните заново: /add');
+        wizardState.delete(userId);
+        return;
+      }
+      const validated = await validateSelectedDate(state.congregationId, ymd);
+      if (!validated.ok) {
+        await ctx.reply(validated.reason);
         return;
       }
       state.step = 'song';
       state.date = ymd;
+      state.isRsVisit = validated.isRsVisit;
       wizardState.set(userId, state);
       await ctx.reply('Шаг 2 из 7. Введите номер песни (1–200) или ? если песня ещё не известна:');
       return;
@@ -135,7 +297,21 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
         return;
       }
       state.talk_number = n;
-      const congregationId = state.congregationId!;
+      if (state.isRsVisit) {
+        const suggested = await getTitleForTalk(db, n);
+        state.step = 'title';
+        wizardState.set(userId, state);
+        if (suggested) {
+          await ctx.reply(
+            `Шаг 4 из 7. Для посещения РС используйте название по их плану.\n` +
+              `Подсказка из списка: «${suggested}».\n` +
+              'Введите фактическое название речи:'
+          );
+        } else {
+          await ctx.reply('Шаг 4 из 7. Введите название речи по плану РС:');
+        }
+        return;
+      }
       const title = await getTitleForTalk(db, n);
       if (title) {
         state.title = title;
@@ -189,14 +365,33 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
         speaker_name: state.speaker_name,
         speaker_phone: state.speaker_phone,
       };
-      const id = await talks.create(input);
+      let id: number;
+      try {
+        id = await talks.create(input);
+      } catch (error) {
+        if (error instanceof TalkDateValidationError) {
+          await ctx.reply(
+            `Эта дата не совпадает с днем встречи собрания. ` +
+              `Выберите ${formatWeekdayRu(error.expectedWeekday)} через /add.`
+          );
+          return;
+        }
+        if (error instanceof TalkDateBlockedByEventError) {
+          await ctx.reply(
+            `Этот уикенд занят событием: ${getExceptionTypeLabel(error.exceptionType)}. ` +
+              'На такую дату публичную речь не планируют.'
+          );
+          return;
+        }
+        throw error;
+      }
       const cong = await congRepo.getById(state.congregationId);
       const songDisplay = state.song_number === 0 ? '?' : state.song_number;
       await ctx.reply(
         `✅ Речь добавлена (ID: ${id}).\n` +
           `${formatDateRu(state.date)}, песня ${songDisplay}, речь №${state.talk_number}\n` +
           `«${state.title}» — ${state.speaker_name}, ${state.speaker_phone}\n` +
-          `Община: ${cong?.name ?? state.congregationId}\n\nПосмотреть расписание: /list`
+          `Собрание: ${cong?.name ?? state.congregationId}\n\nПосмотреть расписание: /list`
       );
       return;
     }

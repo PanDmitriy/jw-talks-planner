@@ -6,6 +6,9 @@ export { initDatabase } from './schema';
 export type {
   Talk,
   TalkInput,
+  ScheduleException,
+  ScheduleExceptionInput,
+  ScheduleExceptionType,
   Congregation,
   UserCongregation,
   TalkPlan,
@@ -20,6 +23,7 @@ export {
   congregationsRepo,
   defaultTalkTitlesRepo,
   talkPlansRepo,
+  scheduleExceptionsRepo,
   talksRepo,
   userCongregationsRepo,
   notificationsRepo,
@@ -28,4 +32,6 @@ export {
   getTalkStatsByYearMatrix,
   getTitleForTalk,
   getMergedPlansForCongregation,
+  TalkDateValidationError,
+  TalkDateBlockedByEventError,
 } from './repositories';

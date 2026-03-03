@@ -7,8 +7,8 @@ import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
-import { talksRepo, congregationsRepo } from '../../db';
-import type { Talk } from '../../db/types';
+import { talksRepo, congregationsRepo, scheduleExceptionsRepo } from '../../db';
+import type { Talk, ScheduleException } from '../../db/types';
 import { splitMessage } from '../utils/splitMessage';
 import { formatDateRu, toYmdString } from '../../utils/date';
 
@@ -16,6 +16,18 @@ const DAY_NAMES = ['Воскресенье', 'Понедельник', 'Втор
 
 function formatSong(n: number): string {
   return n === 0 ? '?' : String(n);
+}
+
+function addDays(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function getUtcDayOfWeek(ymd: string): number {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
 /** Форматирует дату как "Суббота, 10.02.2025" */
@@ -38,16 +50,67 @@ function formatScheduleBlock(t: Talk): string {
   );
 }
 
+function formatExceptionLine(exception: ScheduleException): string {
+  if (exception.exception_type === 'memorial') {
+    return '   🚫 Вечеря воспоминания';
+  }
+  if (exception.exception_type === 'district_congress') {
+    return '   🚫 Районный конгресс';
+  }
+  return '   ℹ️ С публичной и служебной речью выступает РС';
+}
+
 /** Собирает текст расписания с визуальными блоками и разделителями. */
-function buildScheduleText(talks: Talk[]): string {
-  if (talks.length === 0) return '';
+function buildScheduleText(talks: Talk[], exceptions: ScheduleException[]): string {
+  if (talks.length === 0 && exceptions.length === 0) return '';
+  const byDate = new Map<string, { talk?: Talk; exception?: ScheduleException }>();
+  for (const t of talks) {
+    const row = byDate.get(t.date) ?? {};
+    row.talk = t;
+    byDate.set(t.date, row);
+  }
+  for (const e of exceptions) {
+    const row = byDate.get(e.date) ?? {};
+    row.exception = e;
+    byDate.set(e.date, row);
+  }
+  const dates = [...byDate.keys()].sort();
   const sep = '─────────────────────';
-  const blocks = talks.map(formatScheduleBlock).join(`\n\n${sep}\n\n`);
+  const blocks = dates.map((date) => {
+    const row = byDate.get(date)!;
+    const lines: string[] = [`🗓 ${formatDateHeader(date)}`];
+    if (row.talk) {
+      lines.push(`   🎵 ${formatSong(row.talk.song_number)}  ·  №${row.talk.talk_number} «${row.talk.title}»`);
+      lines.push(`   👤 ${row.talk.speaker_name}`);
+    }
+    if (row.exception) {
+      lines.push(formatExceptionLine(row.exception));
+    }
+    return lines.join('\n');
+  }).join(`\n\n${sep}\n\n`);
   return `${sep}\n\n${blocks}\n\n${sep}`;
 }
 
+async function loadScheduleForCongregation(
+  db: DatabaseInstance,
+  congregationId: number,
+  fromDate: string,
+  meetingWeekday: number
+): Promise<{ talks: Talk[]; exceptions: ScheduleException[] }> {
+  const talksAll = await talksRepo(db).listByCongregation(congregationId, { fromDate });
+  const talks = talksAll.filter((t) => getUtcDayOfWeek(t.date) === meetingWeekday);
+  const maxTalkDate = talks[talks.length - 1]?.date;
+  const fallbackToDate = addDays(fromDate, 120);
+  const toDate = maxTalkDate && maxTalkDate > fallbackToDate ? maxTalkDate : fallbackToDate;
+  const exceptionsAll = await scheduleExceptionsRepo(db).listByCongregation(congregationId, {
+    fromDate,
+    toDate,
+  });
+  const exceptions = exceptionsAll.filter((e) => getUtcDayOfWeek(e.date) === meetingWeekday);
+  return { talks, exceptions };
+}
+
 export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
-  const talks = talksRepo(db);
   const congRepo = congregationsRepo(db);
 
   const listHandler = async (ctx: AuthContext) => {
@@ -57,15 +120,29 @@ export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     const today = new Date().toISOString().slice(0, 10);
 
     if (ids.length === 1) {
-      const list = await talks.listByCongregation(ids[0], { fromDate: today });
       const cong = await congRepo.getById(ids[0]);
-      const name = cong?.name ?? 'Община';
-      if (list.length === 0) {
-        await ctx.reply(`В общине «${name}» пока ничего нет. Добавить: /add`);
+      const { talks, exceptions } = await loadScheduleForCongregation(
+        db,
+        ids[0],
+        today,
+        cong?.meeting_weekday ?? 0
+      );
+      const name = cong?.name ?? 'Собрание';
+      const meetingDay = DAY_NAMES[cong?.meeting_weekday ?? 0];
+      const meetingTime = (cong?.meeting_time ?? '10:00').slice(0, 5);
+      if (talks.length === 0 && exceptions.length === 0) {
+        await ctx.reply(
+          `В собрании «${name}» пока ничего нет.\n` +
+            `День и время встречи: ${meetingDay}, ${meetingTime}.\n` +
+            'Добавить: /add'
+        );
         return;
       }
-      const scheduleText = buildScheduleText(list);
-      const fullText = `📅 Расписание — ${name}\n\n${scheduleText}`;
+      const scheduleText = buildScheduleText(talks, exceptions);
+      const fullText =
+        `📅 Расписание — ${name}\n` +
+        `🕒 День и время встречи: ${meetingDay}, ${meetingTime}\n\n` +
+        `${scheduleText}`;
       const chunks = splitMessage(fullText);
       for (const chunk of chunks) await ctx.reply(chunk);
       return;
@@ -89,15 +166,29 @@ export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       return;
     }
     const today = new Date().toISOString().slice(0, 10);
-    const list = await talks.listByCongregation(congregationId, { fromDate: today });
     const cong = await congRepo.getById(congregationId);
-    const name = cong?.name ?? 'Община';
-    if (list.length === 0) {
-      await ctx.editMessageText(`В общине «${name}» пока ничего нет. Добавить: /add`);
+    const { talks, exceptions } = await loadScheduleForCongregation(
+      db,
+      congregationId,
+      today,
+      cong?.meeting_weekday ?? 0
+    );
+    const name = cong?.name ?? 'Собрание';
+    const meetingDay = DAY_NAMES[cong?.meeting_weekday ?? 0];
+    const meetingTime = (cong?.meeting_time ?? '10:00').slice(0, 5);
+    if (talks.length === 0 && exceptions.length === 0) {
+      await ctx.editMessageText(
+        `В собрании «${name}» пока ничего нет.\n` +
+          `День и время встречи: ${meetingDay}, ${meetingTime}.\n` +
+          'Добавить: /add'
+      );
       return;
     }
-    const scheduleText = buildScheduleText(list);
-    const fullText = `📅 Расписание — ${name}\n\n${scheduleText}`;
+    const scheduleText = buildScheduleText(talks, exceptions);
+    const fullText =
+      `📅 Расписание — ${name}\n` +
+      `🕒 День и время встречи: ${meetingDay}, ${meetingTime}\n\n` +
+      `${scheduleText}`;
     const chunks = splitMessage(fullText);
     await ctx.editMessageText(chunks[0]);
     const chatId = ctx.chat?.id;

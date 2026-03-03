@@ -27,10 +27,31 @@ export interface TalkInput {
   speaker_phone: string;
 }
 
+export type ScheduleExceptionType = 'rs_visit' | 'district_congress' | 'memorial';
+
+/** Особое событие на выходных, влияющее на планирование публичной речи */
+export interface ScheduleException {
+  id: number;
+  congregation_id: number;
+  date: string; // YYYY-MM-DD
+  exception_type: ScheduleExceptionType;
+  note: string | null;
+  created_at: string;
+}
+
+export interface ScheduleExceptionInput {
+  congregation_id: number;
+  date: string; // YYYY-MM-DD
+  exception_type: ScheduleExceptionType;
+  note?: string | null;
+}
+
 /** Община */
 export interface Congregation {
   id: number;
   name: string;
+  meeting_weekday: number; // 0=вс ... 6=сб
+  meeting_time: string; // HH:MM:SS
   created_at: string;
 }
 

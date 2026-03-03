@@ -13,16 +13,26 @@ import type {
   SpeakerStats,
   DefaultTalkTitle,
   TalkYearMatrixRow,
+  ScheduleException,
+  ScheduleExceptionInput,
+  ScheduleExceptionType,
 } from './types';
 
 // --- Общины ---
 
 export function congregationsRepo(db: DatabaseInstance) {
   return {
-    async create(name: string): Promise<number> {
+    async create(
+      name: string,
+      options?: { meeting_weekday?: number; meeting_time?: string }
+    ): Promise<number> {
+      const meetingWeekday = options?.meeting_weekday ?? 0;
+      const meetingTime = options?.meeting_time ?? '10:00';
       const result = await db.query(
-        'INSERT INTO congregations (name) VALUES ($1) RETURNING id',
-        [name]
+        `INSERT INTO congregations (name, meeting_weekday, meeting_time)
+         VALUES ($1, $2, $3)
+         RETURNING id`,
+        [name, meetingWeekday, meetingTime]
       );
       return result.rows[0].id as number;
     },
@@ -40,6 +50,12 @@ export function congregationsRepo(db: DatabaseInstance) {
     },
     async updateName(id: number, name: string): Promise<void> {
       await db.query('UPDATE congregations SET name = $1 WHERE id = $2', [name, id]);
+    },
+    async updateSchedule(id: number, meetingWeekday: number, meetingTime: string): Promise<void> {
+      await db.query(
+        'UPDATE congregations SET meeting_weekday = $1, meeting_time = $2 WHERE id = $3',
+        [meetingWeekday, meetingTime, id]
+      );
     },
   };
 }
@@ -204,11 +220,202 @@ export function userCongregationsRepo(db: DatabaseInstance) {
   };
 }
 
+// --- Исключения по датам (выходные события) ---
+
+export class TalkDateValidationError extends Error {
+  readonly code = 'TALK_DATE_NOT_ALLOWED';
+  constructor(
+    public readonly date: string,
+    public readonly expectedWeekday: number
+  ) {
+    super(`Дата ${date} не разрешена для публичной речи`);
+    this.name = 'TalkDateValidationError';
+  }
+}
+
+export class TalkDateBlockedByEventError extends Error {
+  readonly code = 'TALK_DATE_BLOCKED_BY_EVENT';
+  constructor(
+    public readonly date: string,
+    public readonly exceptionType: ScheduleExceptionType
+  ) {
+    super(`Дата ${date} занята событием ${exceptionType}`);
+    this.name = 'TalkDateBlockedByEventError';
+  }
+}
+
+function getUtcDayOfWeek(ymd: string): number {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+function toYmdUtc(date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getWeekendPair(ymd: string): { saturday: string; sunday: string } {
+  const [year, month, day] = ymd.split('-').map(Number);
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  const dow = utc.getUTCDay();
+  const saturdayShift = dow === 6 ? 0 : dow === 0 ? -1 : -(dow + 1);
+  const saturday = new Date(utc);
+  saturday.setUTCDate(saturday.getUTCDate() + saturdayShift);
+  const sunday = new Date(saturday);
+  sunday.setUTCDate(sunday.getUTCDate() + 1);
+  return { saturday: toYmdUtc(saturday), sunday: toYmdUtc(sunday) };
+}
+
+async function getBlockingWeekendEvent(
+  db: DatabaseInstance,
+  congregationId: number,
+  date: string
+): Promise<ScheduleExceptionType | null> {
+  const { saturday, sunday } = getWeekendPair(date);
+  const result = await db.query(
+    `SELECT exception_type
+     FROM schedule_exceptions
+     WHERE congregation_id = $1
+       AND date IN ($2, $3)
+       AND exception_type IN ('district_congress', 'memorial')
+     ORDER BY date
+     LIMIT 1`,
+    [congregationId, saturday, sunday]
+  );
+  const row = result.rows[0] as { exception_type: ScheduleExceptionType } | undefined;
+  return row?.exception_type ?? null;
+}
+
+async function validateTalkDateOrThrow(
+  db: DatabaseInstance,
+  congregationId: number,
+  date: string
+): Promise<void> {
+  const congregationResult = await db.query(
+    'SELECT meeting_weekday FROM congregations WHERE id = $1',
+    [congregationId]
+  );
+  const congregation = congregationResult.rows[0] as { meeting_weekday: number } | undefined;
+  if (!congregation) {
+    throw new Error(`Собрание ${congregationId} не найдено`);
+  }
+  const actualWeekday = getUtcDayOfWeek(date);
+  if (actualWeekday !== congregation.meeting_weekday) {
+    throw new TalkDateValidationError(date, congregation.meeting_weekday);
+  }
+
+  const blockedBy = await getBlockingWeekendEvent(db, congregationId, date);
+  if (blockedBy) {
+    throw new TalkDateBlockedByEventError(date, blockedBy);
+  }
+}
+
+export function scheduleExceptionsRepo(db: DatabaseInstance) {
+  return {
+    async add(input: ScheduleExceptionInput): Promise<number> {
+      const result = await db.query(
+        `INSERT INTO schedule_exceptions (congregation_id, date, exception_type, note)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
+        [input.congregation_id, input.date, input.exception_type, input.note ?? null]
+      );
+      return result.rows[0].id as number;
+    },
+    async upsert(input: ScheduleExceptionInput): Promise<void> {
+      await db.query(
+        `INSERT INTO schedule_exceptions (congregation_id, date, exception_type, note)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (congregation_id, date)
+         DO UPDATE SET exception_type = EXCLUDED.exception_type, note = EXCLUDED.note`,
+        [input.congregation_id, input.date, input.exception_type, input.note ?? null]
+      );
+    },
+    async getByDate(congregationId: number, date: string): Promise<ScheduleException | undefined> {
+      const result = await db.query(
+        `SELECT
+           id,
+           congregation_id,
+           date::text as date,
+           exception_type,
+           note,
+           created_at::text as created_at
+         FROM schedule_exceptions
+         WHERE congregation_id = $1 AND date = $2`,
+        [congregationId, date]
+      );
+      return result.rows[0] as ScheduleException | undefined;
+    },
+    async listByCongregation(
+      congregationId: number,
+      options?: { fromDate?: string; toDate?: string }
+    ): Promise<ScheduleException[]> {
+      let sql = `SELECT
+          id,
+          congregation_id,
+          date::text as date,
+          exception_type,
+          note,
+          created_at::text as created_at
+        FROM schedule_exceptions
+        WHERE congregation_id = $1`;
+      const params: (number | string)[] = [congregationId];
+      let pos = 2;
+      if (options?.fromDate) {
+        sql += ` AND date >= $${pos++}`;
+        params.push(options.fromDate);
+      }
+      if (options?.toDate) {
+        sql += ` AND date <= $${pos++}`;
+        params.push(options.toDate);
+      }
+      sql += ' ORDER BY date, id';
+      const result = await db.query(sql, params);
+      return result.rows as ScheduleException[];
+    },
+    async removeByDate(congregationId: number, date: string): Promise<boolean> {
+      const result = await db.query(
+        'DELETE FROM schedule_exceptions WHERE congregation_id = $1 AND date = $2',
+        [congregationId, date]
+      );
+      return (result.rowCount ?? 0) > 0;
+    },
+    async removeByDates(congregationId: number, dates: string[]): Promise<number> {
+      if (dates.length === 0) return 0;
+      const result = await db.query(
+        'DELETE FROM schedule_exceptions WHERE congregation_id = $1 AND date = ANY($2::date[])',
+        [congregationId, dates]
+      );
+      return result.rowCount ?? 0;
+    },
+    async getWeekendEvents(congregationId: number, date: string): Promise<ScheduleException[]> {
+      const { saturday, sunday } = getWeekendPair(date);
+      const result = await db.query(
+        `SELECT
+           id,
+           congregation_id,
+           date::text as date,
+           exception_type,
+           note,
+           created_at::text as created_at
+         FROM schedule_exceptions
+         WHERE congregation_id = $1
+           AND date IN ($2, $3)
+         ORDER BY date`,
+        [congregationId, saturday, sunday]
+      );
+      return result.rows as ScheduleException[];
+    },
+  };
+}
+
 // --- Публичные речи ---
 
 export function talksRepo(db: DatabaseInstance) {
   return {
     async create(input: TalkInput): Promise<number> {
+      await validateTalkDateOrThrow(db, input.congregation_id, input.date);
       const result = await db.query(
         `INSERT INTO talks (congregation_id, date, song_number, talk_number, title, speaker_name, speaker_phone)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
@@ -225,6 +432,17 @@ export function talksRepo(db: DatabaseInstance) {
       return result.rows[0].id as number;
     },
     async update(id: number, input: Partial<TalkInput>): Promise<void> {
+      if (input.date !== undefined) {
+        let congregationId = input.congregation_id;
+        if (congregationId === undefined) {
+          const existing = await db.query('SELECT congregation_id FROM talks WHERE id = $1', [id]);
+          congregationId = (existing.rows[0] as { congregation_id: number } | undefined)?.congregation_id;
+        }
+        if (congregationId !== undefined) {
+          await validateTalkDateOrThrow(db, congregationId, input.date);
+        }
+      }
+
       const fields: string[] = [];
       const values: unknown[] = [];
       let pos = 1;

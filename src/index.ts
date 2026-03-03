@@ -20,6 +20,8 @@ const BOT_COMMANDS = [
   { command: 'add', description: 'Добавить речь' },
   { command: 'edit', description: 'Изменить речь (выбор по дате)' },
   { command: 'delete', description: 'Удалить речь (выбор по дате)' },
+  { command: 'exceptions', description: 'Исключения в расписании (конгресс/вечеря/РС)' },
+  { command: 'meeting_schedule', description: 'День и время встречи собрания' },
   { command: 'plans', description: 'Список речей (номер + название)' },
   { command: 'stats', description: 'Статистика по речам и докладчикам' },
   { command: 'rename_congregation', description: 'Переименовать общину' },
