@@ -11,7 +11,6 @@ import { registerAddCommand } from './add';
 import { registerEditCommand } from './edit';
 import { registerDeleteCommand } from './delete';
 import { registerStatsCommand } from './stats';
-import { registerCongregationCommand } from './congregation';
 import { registerPlansCommand } from './plans';
 import { registerCheckCommand } from './check';
 import { registerExceptionsCommand } from './exceptions';
@@ -24,7 +23,6 @@ export function registerAllCommands(bot: Telegraf<AuthContext>, db: DatabaseInst
   registerEditCommand(bot, db);
   registerDeleteCommand(bot, db);
   registerStatsCommand(bot, db);
-  registerCongregationCommand(bot, db);
   registerPlansCommand(bot, db);
   registerCheckCommand(bot, db);
   registerExceptionsCommand(bot, db);
