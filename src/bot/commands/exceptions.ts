@@ -67,20 +67,11 @@ function toYmdUtc(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-function getUpcomingWeekendAnchors(limit = 6, fromDate?: string): string[] {
-  const start = fromDate
-    ? (() => {
-        const [y, m, d] = fromDate.split('-').map(Number);
-        return new Date(Date.UTC(y, m - 1, d));
-      })()
-    : new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z');
-  const out: string[] = [];
-  const cursor = new Date(start);
-  while (out.length < limit) {
-    if (cursor.getUTCDay() === 6) out.push(toYmdUtc(cursor));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-  return out;
+function addDays(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
 }
 
 function getWeekendPair(ymd: string): { saturday: string; sunday: string } {
@@ -93,25 +84,6 @@ function getWeekendPair(ymd: string): { saturday: string; sunday: string } {
   const sunday = new Date(saturday);
   sunday.setUTCDate(sunday.getUTCDate() + 1);
   return { saturday: toYmdUtc(saturday), sunday: toYmdUtc(sunday) };
-}
-
-function getQuickWeekendKeyboard() {
-  const anchors = getUpcomingWeekendAnchors(6);
-  const rows = anchors.map((sat) => {
-    const sun = toYmdUtc(new Date(Date.UTC(
-      Number(sat.slice(0, 4)),
-      Number(sat.slice(5, 7)) - 1,
-      Number(sat.slice(8, 10)) + 1
-    )));
-    return [
-      Markup.button.callback(
-        `${formatDateRu(sat)} / ${formatDateRu(sun)}`,
-        `exceptions:wiz:weekend:${sat}`
-      ),
-    ];
-  });
-  rows.push([Markup.button.callback('Ввести дату вручную', 'exceptions:wiz:manual_date')]);
-  return Markup.inlineKeyboard(rows);
 }
 
 function getTypeLabel(type: ScheduleExceptionType): string {
@@ -285,6 +257,65 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
     await ctx.reply('Выберите собрание:', Markup.inlineKeyboard(buttons));
   };
 
+  const getDatePickerKeyboard = async (
+    action: ExceptionAction,
+    congregationId: number,
+    fromDate?: string
+  ) => {
+    const congregation = await congRepo.getById(congregationId);
+    const meetingWeekday = congregation?.meeting_weekday ?? 0;
+    const start = fromDate ?? new Date().toISOString().slice(0, 10);
+    const rows: Array<Array<ReturnType<typeof Markup.button.callback>>> = [];
+    let nextCursor: string | null = null;
+
+    if (action === 'remove') {
+      const toDate = addDays(start, 365);
+      const all = await exceptionsRepo.listByCongregation(congregationId, { fromDate: start, toDate });
+      const dates = [...new Set(all.map((e) => e.date))]
+        .filter((d) => getUtcDayOfWeek(d) === meetingWeekday)
+        .sort();
+      const page = dates.slice(0, 8);
+      nextCursor = dates.length > 8 ? addDays(page[7], 1) : null;
+      for (const d of page) {
+        const exception = await exceptionsRepo.getByDate(congregationId, d);
+        const label = exception ? getTypeLabel(exception.exception_type) : 'Исключение';
+        rows.push([
+          Markup.button.callback(
+            `${formatDateRu(d)} — ${label}`,
+            `exceptions:wiz:datepick:${d}`
+          ),
+        ]);
+      }
+    } else {
+      const found: string[] = [];
+      let cursor = start;
+      let scanned = 0;
+      while (found.length < 9 && scanned < 500) {
+        if (getUtcDayOfWeek(cursor) === meetingWeekday) found.push(cursor);
+        cursor = addDays(cursor, 1);
+        scanned += 1;
+      }
+      const page = found.slice(0, 8);
+      nextCursor = found.length > 8 ? addDays(page[7], 1) : null;
+      for (const d of page) {
+        const exception = await exceptionsRepo.getByDate(congregationId, d);
+        const suffix = exception ? ` (уже: ${getTypeLabel(exception.exception_type)})` : '';
+        rows.push([
+          Markup.button.callback(
+            `${formatDateRu(d)}${suffix}`,
+            `exceptions:wiz:datepick:${d}`
+          ),
+        ]);
+      }
+    }
+
+    if (nextCursor) {
+      rows.push([Markup.button.callback('Показать следующие даты', `exceptions:wiz:dates:more:${nextCursor}`)]);
+    }
+    rows.push([Markup.button.callback('Ввести дату вручную', 'exceptions:wiz:manual_date')]);
+    return Markup.inlineKeyboard(rows);
+  };
+
   bot.command('exceptions', async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return;
@@ -395,7 +426,11 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
       }
       wizardState.set(userId, { step: 'date', action, congregationId: ids[0] });
       await ctx.answerCbQuery();
-      await ctx.editMessageText('Введите выходную дату (ДД.ММ.ГГГГ или YYYY-MM-DD).');
+      const keyboard = await getDatePickerKeyboard(action, ids[0]);
+      await ctx.editMessageText(
+        'Выберите дату исключения для удаления или введите вручную:',
+        keyboard
+      );
       return;
     }
     wizardState.set(userId, { step: 'congregation', action });
@@ -450,15 +485,17 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
     wizardState.set(userId, { ...state, step: 'date', congregationId });
     await ctx.answerCbQuery();
     if (state.action === 'add') {
+      const keyboard = await getDatePickerKeyboard('add', congregationId);
       await ctx.reply(
         `Тип: ${getTypeLabel(state.exceptionType ?? 'rs_visit')}.\n` +
           'Введите выходную дату (ДД.ММ.ГГГГ или YYYY-MM-DD).\n' +
           'Можно добавить комментарий после даты.',
-        getQuickWeekendKeyboard()
+        keyboard
       );
       return;
     }
-    await ctx.reply('Выберите ближайший уикенд или введите дату вручную:', getQuickWeekendKeyboard());
+    const keyboard = await getDatePickerKeyboard('remove', congregationId);
+    await ctx.reply('Выберите дату исключения для удаления или введите вручную:', keyboard);
   });
 
   bot.action(/^exceptions:cong:(\d+)$/, async (ctx) => {
@@ -560,7 +597,25 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
     await ctx.reply('Введите выходную дату в формате ДД.ММ.ГГГГ или YYYY-MM-DD.');
   });
 
-  bot.action(/^exceptions:wiz:weekend:(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+  bot.action(/^exceptions:wiz:dates:more:(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const state = wizardState.get(userId);
+    if (!state || state.step !== 'date' || !state.action || state.congregationId === undefined) {
+      await ctx.answerCbQuery('Сессия неактивна. Запустите /exceptions.');
+      return;
+    }
+    await ctx.answerCbQuery();
+    const keyboard = await getDatePickerKeyboard(state.action, state.congregationId, ctx.match[1]);
+    await ctx.editMessageText(
+      state.action === 'add'
+        ? 'Выберите доступную дату для исключения или введите вручную:'
+        : 'Выберите дату исключения для удаления или введите вручную:',
+      keyboard
+    );
+  });
+
+  bot.action(/^exceptions:wiz:datepick:(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return;
     const state = wizardState.get(userId);
