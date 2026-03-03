@@ -1,6 +1,6 @@
 /**
  * Точка входа: Telegram-бот для ответственных за публичные речи в собрании Свидетелей Иеговы.
- * Telegraf + PostgreSQL, уведомления за 7 дней и за 12 часов (накануне).
+ * Telegraf + PostgreSQL, уведомления за 7 дней и накануне (за 1 день).
  */
 
 import 'dotenv/config';
@@ -24,7 +24,6 @@ const BOT_COMMANDS = [
   { command: 'meeting_schedule', description: 'День и время встречи собрания' },
   { command: 'plans', description: 'Список речей (номер + название)' },
   { command: 'stats', description: 'Статистика по речам и докладчикам' },
-  { command: 'rename_congregation', description: 'Переименовать общину' },
   { command: 'grant', description: 'Выдать доступ (админ)' },
   { command: 'cancel', description: 'Отменить текущую операцию' },
 ] as const;

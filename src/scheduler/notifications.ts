@@ -1,7 +1,7 @@
 /**
  * Планировщик уведомлений:
  * - За 7 дней до речи — просьба подтвердить докладчика
- * - За 12 часов до речи — напоминание (при отсутствии времени в БД — за 1 день до)
+ * - Накануне (за 1 день до речи) — напоминание
  */
 
 import type { Telegraf } from 'telegraf';
@@ -65,7 +65,7 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
       await notifRepo.markSent(talk.id, NOTIFY_7_DAYS);
     }
 
-    // Уведомление «за 12 часов» — трактуем как за 1 день (накануне)
+    // Уведомление «накануне» (за 1 день до речи)
     const talksTomorrow = await talks.listUpcoming(tomorrow, tomorrow);
     for (const talk of talksTomorrow) {
       if (await notifRepo.wasSent(talk.id, NOTIFY_12_HOURS)) continue;

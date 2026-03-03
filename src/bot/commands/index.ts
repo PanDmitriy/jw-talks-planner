@@ -15,6 +15,7 @@ import { registerPlansCommand } from './plans';
 import { registerCheckCommand } from './check';
 import { registerExceptionsCommand } from './exceptions';
 import { registerMeetingScheduleCommand } from './meetingSchedule';
+import { registerCancelCommand } from './cancel';
 
 export function registerAllCommands(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   registerStartCommand(bot, db);
@@ -27,4 +28,5 @@ export function registerAllCommands(bot: Telegraf<AuthContext>, db: DatabaseInst
   registerCheckCommand(bot, db);
   registerExceptionsCommand(bot, db);
   registerMeetingScheduleCommand(bot, db);
+  registerCancelCommand(bot);
 }
