@@ -14,12 +14,19 @@ interface PendingScheduleAction {
   time: string;
 }
 
+interface ScheduleEditState {
+  step: 'time';
+  congregationId: number;
+  weekday: number;
+}
+
 const pendingAction = new Map<number, PendingScheduleAction>();
+const editState = new Map<number, ScheduleEditState>();
 
 function getHelpText(): string {
   return [
     'Управление расписанием встречи собрания:',
-    '/meeting_schedule — показать текущие день и время',
+    '/meeting_schedule — показать текущие день и время (и кнопки изменения)',
     '/meeting_schedule set <день> <HH:MM> — изменить',
     '',
     'Примеры:',
@@ -31,6 +38,12 @@ function getHelpText(): string {
 export function registerMeetingScheduleCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {
   const congRepo = congregationsRepo(db);
 
+  const getWeekdayKeyboard = (congregationId: number) =>
+    Markup.inlineKeyboard([
+      [Markup.button.callback('Суббота', `meeting_schedule:weekday:${congregationId}:6`)],
+      [Markup.button.callback('Воскресенье', `meeting_schedule:weekday:${congregationId}:0`)],
+    ]);
+
   const showSchedule = async (ctx: AuthContext, congregationId: number): Promise<void> => {
     const congregation = await congRepo.getById(congregationId);
     if (!congregation) {
@@ -40,7 +53,10 @@ export function registerMeetingScheduleCommand(bot: Telegraf<AuthContext>, db: D
     await ctx.reply(
       `Собрание: ${congregation.name}\n` +
         `День встречи: ${formatWeekdayRu(congregation.meeting_weekday)}\n` +
-        `Время встречи: ${formatMeetingTime(congregation.meeting_time)}`
+        `Время встречи: ${formatMeetingTime(congregation.meeting_time)}`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('Изменить день/время', `meeting_schedule:change:${congregation.id}`)],
+      ])
     );
   };
 
@@ -62,6 +78,7 @@ export function registerMeetingScheduleCommand(bot: Telegraf<AuthContext>, db: D
   bot.command('meeting_schedule', async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return;
+    editState.delete(userId);
     const ids = ctx.congregationIds ?? [];
     if (ids.length === 0) return;
 
@@ -125,6 +142,39 @@ export function registerMeetingScheduleCommand(bot: Telegraf<AuthContext>, db: D
     await showSchedule(ctx, congregationId);
   });
 
+  bot.action(/^meeting_schedule:change:(\d+)$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const congregationId = parseInt(ctx.match[1], 10);
+    if (!ctx.congregationIds?.includes(congregationId)) {
+      await ctx.answerCbQuery('Нет доступа.');
+      return;
+    }
+    editState.delete(userId);
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      'Выберите новый день встречи (доступны только выходные):',
+      getWeekdayKeyboard(congregationId)
+    );
+  });
+
+  bot.action(/^meeting_schedule:weekday:(\d+):(0|6)$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const congregationId = parseInt(ctx.match[1], 10);
+    const weekday = parseInt(ctx.match[2], 10);
+    if (!ctx.congregationIds?.includes(congregationId)) {
+      await ctx.answerCbQuery('Нет доступа.');
+      return;
+    }
+    editState.set(userId, { step: 'time', congregationId, weekday });
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      `Выбран день: ${formatWeekdayRu(weekday)}.\n` +
+        'Введите новое время в формате HH:MM (например 10:00), или /cancel для отмены.'
+    );
+  });
+
   bot.action(/^meeting_schedule:set:(\d+)$/, async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return;
@@ -141,5 +191,39 @@ export function registerMeetingScheduleCommand(bot: Telegraf<AuthContext>, db: D
     pendingAction.delete(userId);
     await ctx.answerCbQuery();
     await applySchedule(ctx, congregationId, action);
+  });
+
+  bot.on('message', async (ctx, next) => {
+    const userId = ctx.from?.id;
+    if (!userId) return next();
+    const state = editState.get(userId);
+    if (!state) return next();
+    const text = (ctx.message as { text?: string })?.text?.trim();
+    if (!text) return next();
+
+    if (text === '/cancel') {
+      editState.delete(userId);
+      await ctx.reply('Изменение расписания отменено.');
+      return;
+    }
+    if (text.startsWith('/')) {
+      editState.delete(userId);
+      return next();
+    }
+
+    if (!ctx.congregationIds?.includes(state.congregationId)) {
+      editState.delete(userId);
+      await ctx.reply('Нет доступа к этому собранию.');
+      return;
+    }
+
+    const normalizedTime = normalizeMeetingTime(text);
+    if (!normalizedTime) {
+      await ctx.reply('Неверный формат времени. Используйте HH:MM, например 10:00.');
+      return;
+    }
+
+    await applySchedule(ctx, state.congregationId, { weekday: state.weekday, time: normalizedTime });
+    editState.delete(userId);
   });
 }

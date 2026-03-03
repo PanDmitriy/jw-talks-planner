@@ -113,9 +113,16 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
     if (congregationName) {
       let cong = congregations.find((c) => c.name.toLowerCase() === congregationName.toLowerCase());
       if (!cong) {
+        if (meetingWeekday === null || meetingTime === null) {
+          await ctx.reply(
+            'Для нового собрания укажите день и время встречи.\n' +
+              `Пример: /grant @${username} ${congregationName} воскресенье 10:00`
+          );
+          return;
+        }
         congregationId = await congRepo.create(congregationName, {
-          meeting_weekday: meetingWeekday ?? 0,
-          meeting_time: meetingTime ?? '10:00',
+          meeting_weekday: meetingWeekday,
+          meeting_time: meetingTime,
         });
         cong = await congRepo.getById(congregationId);
       } else {
@@ -124,10 +131,17 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
     } else {
       if (congregations.length === 0) {
         // Первый grant без названия — создаём собрание по умолчанию
+        if (meetingWeekday === null || meetingTime === null) {
+          await ctx.reply(
+            'Первое собрание нужно создать с днем и временем встречи.\n' +
+              `Пример: /grant @${username} "Собрание 1" воскресенье 10:00`
+          );
+          return;
+        }
         const defaultName = process.env.DEFAULT_CONGREGATION_NAME || 'Собрание 1';
         congregationId = await congRepo.create(defaultName, {
-          meeting_weekday: meetingWeekday ?? 0,
-          meeting_time: meetingTime ?? '10:00',
+          meeting_weekday: meetingWeekday,
+          meeting_time: meetingTime,
         });
         const cong = await congRepo.getById(congregationId);
         getPendingGrants().add(username, congregationId);
@@ -171,7 +185,7 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
     const scheduleHint =
       meetingWeekday !== null && meetingTime !== null
         ? ''
-        : '\nДля нового собрания можно сразу указать день и время: /grant @username Название воскресенье 10:00';
+        : '\nДля нового собрания обязательно указывайте день и время: /grant @username Название воскресенье 10:00';
     await ctx.reply(
       `Доступ для @${username} к собранию «${cong?.name}»${scheduleInfo} будет выдан, когда пользователь напишет боту /start.${scheduleHint}`
     );
