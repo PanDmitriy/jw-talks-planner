@@ -6,6 +6,7 @@ import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
+import ExcelJS from 'exceljs';
 import { getTalkStats, getTalkStatsByYearMatrix, congregationsRepo } from '../../db';
 import { splitMessage } from '../utils/splitMessage';
 import { formatDateRu } from '../../utils/date';
@@ -66,24 +67,89 @@ export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     const name = cong?.name ?? `Община ${congregationId}`;
     const matrix = await getTalkStatsByYearMatrix(db, congregationId, { fromYear: 2020, toYear: 2028 });
     const years = [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028];
-    const header = ['№', 'Название', ...years.map(String)].join(';');
-    const escapeCsv = (s: string) => (s.includes(';') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s);
-    const lines = [header];
-    for (const row of matrix) {
-      const cells = [
-        String(row.talk_number),
-        escapeCsv(row.title),
-        ...years.map((y) => row.datesByYear[y] ?? ''),
-      ];
-      lines.push(cells.join(';'));
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'JW Talks Planner Bot';
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet('Матрица', {
+      views: [{ state: 'frozen', ySplit: 4, xSplit: 2 }],
+    });
+
+    const lastColumnLetter = String.fromCharCode(65 + years.length + 2);
+    sheet.mergeCells(`A1:${lastColumnLetter}1`);
+    sheet.getCell('A1').value = `Учёт по годам — ${name}`;
+    sheet.getCell('A1').font = { bold: true, size: 14 };
+    sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
+
+    sheet.mergeCells(`A2:${lastColumnLetter}2`);
+    sheet.getCell('A2').value = `Период: ${years[0]}-${years[years.length - 1]} | Тем в матрице: ${matrix.length} | Даты в формате ДД.ММ`;
+    sheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
+
+    const headers = ['№', 'Название речи', ...years.map(String), 'Итого дат'];
+    const headerRowIndex = 4;
+    const headerRow = sheet.getRow(headerRowIndex);
+    headerRow.values = headers;
+    headerRow.height = 22;
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        right: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+      };
+    });
+
+    for (const [index, row] of matrix.entries()) {
+      const datesByYears = years.map((y) => row.datesByYear[y] ?? '');
+      const totalDates = datesByYears
+        .flatMap((value) => value.split(', ').filter(Boolean))
+        .length;
+      const excelRow = sheet.addRow([
+        row.talk_number,
+        row.title,
+        ...datesByYears,
+        totalDates,
+      ]);
+      excelRow.height = 34;
+      excelRow.eachCell((cell, colNumber) => {
+        const isTitleColumn = colNumber === 2;
+        cell.alignment = {
+          horizontal: isTitleColumn ? 'left' : 'center',
+          vertical: 'middle',
+          wrapText: true,
+        };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE6E6E6' } },
+          left: { style: 'thin', color: { argb: 'FFE6E6E6' } },
+          bottom: { style: 'thin', color: { argb: 'FFE6E6E6' } },
+          right: { style: 'thin', color: { argb: 'FFE6E6E6' } },
+        };
+        if (index % 2 === 1) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7FBFF' } };
+        }
+      });
     }
-    const csv = '\uFEFF' + lines.join('\n');
-    const fileName = `stats-${name.replace(/\s+/g, '-')}-по-годам.csv`;
+
+    sheet.columns = [
+      { width: 6 },
+      { width: 44 },
+      ...years.map(() => ({ width: 12 })),
+      { width: 12 },
+    ];
+    sheet.autoFilter = {
+      from: { row: headerRowIndex, column: 1 },
+      to: { row: headerRowIndex, column: headers.length },
+    };
+
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer() as ArrayBuffer);
+    const fileName = `stats-${name.replace(/\s+/g, '-')}-по-годам.xlsx`;
     await ctx.telegram.sendDocument(ctx.chat!.id, {
-      source: Buffer.from(csv, 'utf8'),
+      source: buffer,
       filename: fileName,
     }, {
-      caption: `📅 Учёт по годам — ${name}. Даты в формате ДД.ММ.`,
+      caption: `📅 Учёт по годам (XLSX) — ${name}. Добавлены перенос названий, фильтр и итоги.`,
     });
   });
 }
@@ -130,7 +196,7 @@ async function sendStatsForCongregation(
     }
   }
 
-  const matrixButton = Markup.button.callback('📅 По годам (матрица CSV)', `stats:matrix:${congregationId}`);
+  const matrixButton = Markup.button.callback('📅 По годам (матрица XLSX)', `stats:matrix:${congregationId}`);
 
   const chunks = splitMessage(msg);
   const keyboard = Markup.inlineKeyboard([matrixButton]);

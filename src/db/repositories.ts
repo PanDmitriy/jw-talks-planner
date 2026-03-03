@@ -438,8 +438,9 @@ export async function getSpeakerStats(
 
 function formatDateForMatrix(isoDate: string): string {
   const [y, m, d] = isoDate.split('-').map(Number);
+  const day = String(d).padStart(2, '0');
   const month = String(m).padStart(2, '0');
-  return `${d}.${month}`;
+  return `${day}.${month}`;
 }
 
 export async function getTalkStatsByYearMatrix(
