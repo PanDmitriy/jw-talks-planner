@@ -420,7 +420,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       }
       const cong = await congRepo.getById(state.congregationId);
       const songDisplay = state.song_number === 0 ? '?' : state.song_number;
-      const talkNumberDisplay = state.talk_number === 0 ? 'произвольная тема' : `№${state.talk_number}`;
+      const talkNumberDisplay = state.talk_number === 0 ? '' : `№${state.talk_number}`;
       await ctx.reply(
         `✅ Речь добавлена (ID: ${id}).\n` +
           `${formatDateRu(state.date)}, песня ${songDisplay}, речь ${talkNumberDisplay}\n` +

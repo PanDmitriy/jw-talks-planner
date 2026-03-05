@@ -19,7 +19,7 @@ function formatSong(n: number): string {
 }
 
 function formatTalkNumber(n: number): string {
-  return n === 0 ? 'произвольная тема' : `№${n}`;
+  return n === 0 ? '' : `№${n}`;
 }
 
 function addDays(ymd: string, days: number): string {

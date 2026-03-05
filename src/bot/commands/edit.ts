@@ -81,7 +81,7 @@ function getEditFieldKeyboard() {
 }
 
 function formatTalkNumber(n: number): string {
-  return n === 0 ? 'произвольная тема' : `№${n}`;
+  return n === 0 ? '' : `№${n}`;
 }
 
 function formatEditTalkCard(congregationName: string, talk: { date: string; song_number: number; talk_number: number; title: string; speaker_name: string; speaker_phone: string }): string {
