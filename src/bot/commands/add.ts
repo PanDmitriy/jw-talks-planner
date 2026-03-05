@@ -14,7 +14,7 @@ import {
   TalkDateValidationError,
   TalkDateBlockedByEventError,
 } from '../../db';
-import type { TalkInput } from '../../db/types';
+import type { TalkInput, ScheduleExceptionType } from '../../db/types';
 import { formatDateRu, parseUserDateToYmd } from '../../utils/date';
 import { formatWeekdayRu } from '../utils/meetingSchedule';
 
@@ -36,7 +36,7 @@ interface AddTalkState {
   title?: string;
   speaker_name?: string;
   speaker_phone?: string;
-  isRsVisit?: boolean;
+  manualTitleExceptionType?: ScheduleExceptionType;
   dateCursorFrom?: string;
 }
 
@@ -48,10 +48,17 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
   const exceptionsRepo = scheduleExceptionsRepo(db);
 
   const BLOCKING_TYPES = new Set(['district_congress', 'memorial']);
+  const MANUAL_TITLE_TYPES = new Set<ScheduleExceptionType>([
+    'rs_visit',
+    'special_talk_before_memorial',
+    'bethel_speaker_visit',
+  ]);
 
   function getExceptionTypeLabel(type: string): string {
     if (type === 'district_congress') return 'Районный конгресс';
     if (type === 'memorial') return 'Вечеря воспоминания';
+    if (type === 'special_talk_before_memorial') return 'Специальная речь перед Вечерей';
+    if (type === 'bethel_speaker_visit') return 'Посещение вефильского докладчика';
     return 'Посещение РС';
   }
 
@@ -70,7 +77,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
   async function validateSelectedDate(
     congregationId: number,
     ymd: string
-  ): Promise<{ ok: true; isRsVisit: boolean } | { ok: false; reason: string }> {
+  ): Promise<{ ok: true; manualTitleExceptionType?: ScheduleExceptionType } | { ok: false; reason: string }> {
     const congregation = await congRepo.getById(congregationId);
     if (!congregation) return { ok: false, reason: 'Собрание не найдено.' };
     const weekday = getUtcDayOfWeek(ymd);
@@ -92,8 +99,8 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
     if (existing.length > 0) {
       return { ok: false, reason: `На ${formatDateRu(ymd)} уже запланирована публичная речь.` };
     }
-    const isRsVisit = events.some((e) => e.exception_type === 'rs_visit');
-    return { ok: true, isRsVisit };
+    const manualTitleException = events.find((e) => MANUAL_TITLE_TYPES.has(e.exception_type))?.exception_type;
+    return { ok: true, manualTitleExceptionType: manualTitleException };
   }
 
   async function getNextAvailableDates(
@@ -205,7 +212,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       return;
     }
     state.date = ymd;
-    state.isRsVisit = validated.isRsVisit;
+    state.manualTitleExceptionType = validated.manualTitleExceptionType;
     state.step = 'song';
     wizardState.set(userId, state);
     await ctx.answerCbQuery();
@@ -266,7 +273,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       }
       state.step = 'song';
       state.date = ymd;
-      state.isRsVisit = validated.isRsVisit;
+      state.manualTitleExceptionType = validated.manualTitleExceptionType;
       wizardState.set(userId, state);
       await ctx.reply('Шаг 2 из 7. Введите номер песни (1–200) или ? если песня ещё не известна:');
       return;
@@ -284,34 +291,60 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
         }
         state.song_number = n;
       }
-      state.step = 'talk_number';
-      wizardState.set(userId, state);
-      await ctx.reply('Шаг 3 из 7. Введите номер речи из списка (/plans):');
+      if (state.manualTitleExceptionType) {
+        state.step = 'talk_number';
+        wizardState.set(userId, state);
+        await ctx.reply(
+          `Шаг 3 из 7. Для события «${getExceptionTypeLabel(state.manualTitleExceptionType)}» ` +
+            'номер речи можно не указывать.\n' +
+            'Введите номер речи или ? (либо 0), если используете произвольную тему:'
+        );
+      } else {
+        state.step = 'talk_number';
+        wizardState.set(userId, state);
+        await ctx.reply('Шаг 3 из 7. Введите номер речи из списка (/plans):');
+      }
       return;
     }
 
     if (state.step === 'talk_number') {
-      const n = parseInt(text, 10);
-      if (isNaN(n) || n < 1) {
-        await ctx.reply('Введите номер речи (положительное число):');
-        return;
-      }
-      state.talk_number = n;
-      if (state.isRsVisit) {
-        const suggested = await getTitleForTalk(db, n);
+      if (state.manualTitleExceptionType) {
+        const trimmed = text.trim();
+        if (trimmed === '?' || trimmed === '？' || trimmed === '0') {
+          state.talk_number = 0;
+        } else {
+          const n = parseInt(text, 10);
+          if (isNaN(n) || n < 1) {
+            await ctx.reply('Введите номер речи (положительное число) или ?/0 для произвольной темы:');
+            return;
+          }
+          state.talk_number = n;
+        }
+        const suggested =
+          state.talk_number > 0 ? await getTitleForTalk(db, state.talk_number) : undefined;
         state.step = 'title';
         wizardState.set(userId, state);
         if (suggested) {
           await ctx.reply(
-            `Шаг 4 из 7. Для посещения РС используйте название по их плану.\n` +
+            `Шаг 4 из 7. Для события «${getExceptionTypeLabel(state.manualTitleExceptionType)}» ` +
+              'название вводится вручную.\n' +
               `Подсказка из списка: «${suggested}».\n` +
               'Введите фактическое название речи:'
           );
         } else {
-          await ctx.reply('Шаг 4 из 7. Введите название речи по плану РС:');
+          await ctx.reply(
+            `Шаг 4 из 7. Для события «${getExceptionTypeLabel(state.manualTitleExceptionType)}» ` +
+              'введите название речи вручную:'
+          );
         }
         return;
       }
+      const n = parseInt(text, 10);
+      if (isNaN(n) || n < 1) {
+        await ctx.reply('Введите номер речи из списка (положительное число):');
+        return;
+      }
+      state.talk_number = n;
       const title = await getTitleForTalk(db, n);
       if (title) {
         state.title = title;
@@ -387,9 +420,10 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
       }
       const cong = await congRepo.getById(state.congregationId);
       const songDisplay = state.song_number === 0 ? '?' : state.song_number;
+      const talkNumberDisplay = state.talk_number === 0 ? 'произвольная тема' : `№${state.talk_number}`;
       await ctx.reply(
         `✅ Речь добавлена (ID: ${id}).\n` +
-          `${formatDateRu(state.date)}, песня ${songDisplay}, речь №${state.talk_number}\n` +
+          `${formatDateRu(state.date)}, песня ${songDisplay}, речь ${talkNumberDisplay}\n` +
           `«${state.title}» — ${state.speaker_name}, ${state.speaker_phone}\n` +
           `Собрание: ${cong?.name ?? state.congregationId}\n\nПосмотреть расписание: /list`
       );

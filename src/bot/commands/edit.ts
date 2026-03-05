@@ -14,7 +14,7 @@ import {
   TalkDateValidationError,
   TalkDateBlockedByEventError,
 } from '../../db';
-import type { TalkInput } from '../../db/types';
+import type { TalkInput, ScheduleExceptionType } from '../../db/types';
 import { formatDateRu, parseUserDateToYmd } from '../../utils/date';
 import { formatWeekdayRu } from '../utils/meetingSchedule';
 
@@ -80,11 +80,15 @@ function getEditFieldKeyboard() {
   ]);
 }
 
+function formatTalkNumber(n: number): string {
+  return n === 0 ? 'произвольная тема' : `№${n}`;
+}
+
 function formatEditTalkCard(congregationName: string, talk: { date: string; song_number: number; talk_number: number; title: string; speaker_name: string; speaker_phone: string }): string {
   return (
     `Редактирование речи (${congregationName}):\n` +
     `Дата: ${formatDateRu(talk.date)}\n` +
-    `Песня: ${talk.song_number === 0 ? '?' : talk.song_number}, Речь: №${talk.talk_number}\n` +
+    `Песня: ${talk.song_number === 0 ? '?' : talk.song_number}, Речь: ${formatTalkNumber(talk.talk_number)}\n` +
     `Название: ${talk.title}\n` +
     `Докладчик: ${talk.speaker_name}, ${talk.speaker_phone}\n\n` +
     'Что изменить?'
@@ -96,10 +100,17 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
   const congRepo = congregationsRepo(db);
   const exceptionsRepo = scheduleExceptionsRepo(db);
   const BLOCKING_TYPES = new Set(['district_congress', 'memorial']);
+  const MANUAL_TITLE_TYPES = new Set<ScheduleExceptionType>([
+    'rs_visit',
+    'special_talk_before_memorial',
+    'bethel_speaker_visit',
+  ]);
 
   function getExceptionTypeLabel(type: string): string {
     if (type === 'district_congress') return 'Районный конгресс';
     if (type === 'memorial') return 'Вечеря воспоминания';
+    if (type === 'special_talk_before_memorial') return 'Специальная речь перед Вечерей';
+    if (type === 'bethel_speaker_visit') return 'Посещение вефильского докладчика';
     return 'Посещение РС';
   }
 
@@ -200,7 +211,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     }
     const talkButtons = onDate.map((t, i) =>
       Markup.button.callback(
-        `${i + 1}. Песня ${t.song_number === 0 ? '?' : t.song_number}, №${t.talk_number} — ${t.speaker_name}`,
+        `${i + 1}. Песня ${t.song_number === 0 ? '?' : t.song_number}, ${formatTalkNumber(t.talk_number)} — ${t.speaker_name}`,
         `edit:talk:${t.id}`
       )
     );
@@ -236,7 +247,8 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
   const fieldPrompts: Record<string, string> = {
     date: 'Введите новую дату (ДД.ММ.ГГГГ):',
     song: 'Введите новый номер песни (1–200 или ? если ещё не известна):',
-    talk_number: 'Введите новый номер речи (название подставится из списка, кроме уикенда РС):',
+    talk_number:
+      'Введите новый номер речи (название подставится из списка, кроме РС/спецречи перед Вечерей/вефильского докладчика):',
     speaker_name: 'Введите новое имя докладчика:',
     speaker_phone: 'Введите новый номер телефона:',
   };
@@ -318,6 +330,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
 
     let value: string | number = text;
     let normalizedDate: string | null = null;
+    let hasManualTitleEventForTalk = false;
     if (state.step === 'date') {
       normalizedDate = parseUserDateToYmd(text);
       if (!normalizedDate) {
@@ -337,12 +350,23 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
         value = n;
       }
     } else if (state.step === 'talk_number') {
-      const n = parseInt(text, 10);
-      if (isNaN(n) || n < 1) {
-        await ctx.reply('Введите номер речи (число):');
-        return;
+      const events = await exceptionsRepo.getWeekendEvents(talk.congregation_id, talk.date);
+      hasManualTitleEventForTalk = events.some((event) => MANUAL_TITLE_TYPES.has(event.exception_type));
+      const trimmed = text.trim();
+      if (hasManualTitleEventForTalk && (trimmed === '?' || trimmed === '0')) {
+        value = 0;
+      } else {
+        const n = parseInt(text, 10);
+        if (isNaN(n) || n < 1) {
+          await ctx.reply(
+            hasManualTitleEventForTalk
+              ? 'Введите номер речи (число) или 0/? для произвольной темы:'
+              : 'Введите номер речи (число):'
+          );
+          return;
+        }
+        value = n;
       }
-      value = n;
     }
 
     const update: Partial<TalkInput> = {};
@@ -350,9 +374,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     else if (state.step === 'song') update.song_number = value as number;
     else if (state.step === 'talk_number') {
       update.talk_number = value as number;
-      const events = await exceptionsRepo.getWeekendEvents(talk.congregation_id, talk.date);
-      const isRsVisit = events.some((event) => event.exception_type === 'rs_visit');
-      if (!isRsVisit) {
+      if (!hasManualTitleEventForTalk) {
         const newTitle = await getTitleForTalk(db, value as number);
         if (newTitle) update.title = newTitle;
       }

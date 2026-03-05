@@ -27,7 +27,12 @@ export interface TalkInput {
   speaker_phone: string;
 }
 
-export type ScheduleExceptionType = 'rs_visit' | 'district_congress' | 'memorial';
+export type ScheduleExceptionType =
+  | 'rs_visit'
+  | 'district_congress'
+  | 'memorial'
+  | 'special_talk_before_memorial'
+  | 'bethel_speaker_visit';
 
 /** Особое событие на выходных, влияющее на планирование публичной речи */
 export interface ScheduleException {

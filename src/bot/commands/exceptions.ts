@@ -48,6 +48,13 @@ const TYPE_ALIASES: Record<string, ScheduleExceptionType> = {
   'конгресс': 'district_congress',
   memorial: 'memorial',
   'вечеря': 'memorial',
+  special_talk_before_memorial: 'special_talk_before_memorial',
+  special_talk: 'special_talk_before_memorial',
+  'спецречь': 'special_talk_before_memorial',
+  'специальная_речь': 'special_talk_before_memorial',
+  bethel_speaker_visit: 'bethel_speaker_visit',
+  bethel_visit: 'bethel_speaker_visit',
+  'вефиль': 'bethel_speaker_visit',
 };
 
 function getUtcDayOfWeek(ymd: string): number {
@@ -89,6 +96,8 @@ function getWeekendPair(ymd: string): { saturday: string; sunday: string } {
 function getTypeLabel(type: ScheduleExceptionType): string {
   if (type === 'rs_visit') return 'Посещение РС';
   if (type === 'district_congress') return 'Районный конгресс';
+  if (type === 'special_talk_before_memorial') return 'Специальная речь перед Вечерей';
+  if (type === 'bethel_speaker_visit') return 'Посещение вефильского докладчика';
   return 'Вечеря воспоминания';
 }
 
@@ -132,11 +141,13 @@ function getHelpText(): string {
     '/exceptions remove <дата>',
     '',
     'Дата: ДД.ММ.ГГГГ или YYYY-MM-DD (только выходной день)',
-    'Типы: rs_visit (РС), district_congress (конгресс), memorial (вечеря)',
+    'Типы: rs_visit (РС), district_congress (конгресс), memorial (вечеря),',
+    '      special_talk_before_memorial (спецречь перед Вечерей), bethel_speaker_visit (вефильский докладчик)',
     '',
     'Важно:',
     '- district_congress и memorial блокируют планирование речи на весь уикенд (сб+вс)',
-    '- rs_visit информационный: публичную речь планировать можно, с произвольным названием',
+    '- rs_visit / special_talk_before_memorial / bethel_speaker_visit — информационные:',
+    '  публичную речь планировать можно, обычно с названием по фактической программе',
   ].join('\n');
 }
 
@@ -154,6 +165,8 @@ function getTypeKeyboard() {
     [Markup.button.callback('Посещение РС', 'exceptions:wiz:type:rs_visit')],
     [Markup.button.callback('Районный конгресс', 'exceptions:wiz:type:district_congress')],
     [Markup.button.callback('Вечеря воспоминания', 'exceptions:wiz:type:memorial')],
+    [Markup.button.callback('Специальная речь перед Вечерей', 'exceptions:wiz:type:special_talk_before_memorial')],
+    [Markup.button.callback('Посещение вефильского докладчика', 'exceptions:wiz:type:bethel_speaker_visit')],
   ]);
 }
 
@@ -198,8 +211,8 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
         });
       }
       const behavior =
-        action.exceptionType === 'rs_visit'
-          ? 'Публичную речь можно планировать, но обычно с названием по плану РС.'
+        ['rs_visit', 'special_talk_before_memorial', 'bethel_speaker_visit'].includes(action.exceptionType)
+          ? 'Публичную речь можно планировать, обычно с фактическим названием по программе.'
           : 'Публичная речь на этот уикенд блокируется.';
       await ctx.reply(
         `✅ Событие добавлено на уикенд.\n` +
@@ -354,7 +367,10 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
       }
       const exceptionType = parseExceptionType(args[2]);
       if (!exceptionType) {
-        await ctx.reply('Неизвестный тип. Допустимо: rs_visit, district_congress, memorial.');
+        await ctx.reply(
+          'Неизвестный тип. Допустимо: rs_visit, district_congress, memorial, ' +
+            'special_talk_before_memorial, bethel_speaker_visit.'
+        );
         return;
       }
       const note = args.slice(3).join(' ').trim() || undefined;
@@ -438,13 +454,16 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
     await askWizardCongregation(ctx, ids);
   });
 
-  bot.action(/^exceptions:wiz:type:(rs_visit|district_congress|memorial)$/, async (ctx) => {
+  bot.action(
+    /^exceptions:wiz:type:(rs_visit|district_congress|memorial|special_talk_before_memorial|bethel_speaker_visit)$/,
+    async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return;
     const ids = ctx.congregationIds ?? [];
     if (ids.length === 0) return;
     const type = ctx.match[1] as ScheduleExceptionType;
     if (ids.length === 1) {
+      const keyboard = await getDatePickerKeyboard('add', ids[0]);
       wizardState.set(userId, {
         step: 'date',
         action: 'add',
@@ -453,15 +472,18 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
       });
       await ctx.answerCbQuery();
       await ctx.editMessageText(
-        `Тип: ${getTypeLabel(type)}.\nВведите выходную дату (ДД.ММ.ГГГГ или YYYY-MM-DD).\n` +
-          'Можно добавить комментарий после даты.'
+        `Тип: ${getTypeLabel(type)}.\n` +
+          'Выберите дату кнопкой ниже или введите вручную (ДД.ММ.ГГГГ / YYYY-MM-DD).\n' +
+          'Если вводите вручную, можно добавить комментарий после даты в этом же сообщении.',
+        keyboard
       );
       return;
     }
     wizardState.set(userId, { step: 'congregation', action: 'add', exceptionType: type });
     await ctx.answerCbQuery();
     await askWizardCongregation(ctx, ids);
-  });
+    }
+  );
 
   bot.action(/^exceptions:wiz:cong:(\d+)$/, async (ctx) => {
     const userId = ctx.from?.id;

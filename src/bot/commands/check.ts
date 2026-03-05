@@ -16,6 +16,16 @@ export function registerCheckCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
   const talks = talksRepo(db);
   const congRepo = congregationsRepo(db);
 
+  const checkHandler = async (ctx: AuthContext): Promise<void> => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+    const ids = ctx.congregationIds ?? [];
+    if (ids.length === 0) return;
+
+    checkState.set(userId, { step: 'talk_number' });
+    await ctx.reply('Введите номер речи для проверки (или /cancel для отмены):');
+  };
+
   const sendCheckResult = async (
     ctx: AuthContext,
     congregationId: number,
@@ -56,15 +66,8 @@ export function registerCheckCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     }
   };
 
-  bot.command('check', async (ctx) => {
-    const userId = ctx.from?.id;
-    if (!userId) return;
-    const ids = ctx.congregationIds ?? [];
-    if (ids.length === 0) return;
-
-    checkState.set(userId, { step: 'talk_number' });
-    await ctx.reply('Введите номер речи для проверки (или /cancel для отмены):');
-  });
+  bot.command('check', checkHandler);
+  bot.hears('✅ Проверить речь', checkHandler);
 
   bot.action(/^check:cong:(\d+):(\d+)$/, async (ctx) => {
     const congregationId = parseInt(ctx.match[1], 10);

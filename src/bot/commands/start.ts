@@ -18,7 +18,7 @@ const HELP_TEXT = `
 /add — добавить речь
 /edit — изменить речь (выбор по дате)
 /delete — удалить речь (выбор по дате)
-/exceptions — исключения в расписании (конгресс/вечеря/РС)
+/exceptions — исключения в расписании (конгресс/вечеря/РС/спецречь/вефильский докладчик)
 /meeting_schedule — настройки собрания (день, время, название)
 
 Список речей (номера и названия для подстановки при добавлении речи)
@@ -37,7 +37,7 @@ const HELP_TEXT = `
 /** Reply-клавиатура быстрых действий (показывается после /start) */
 export const QUICK_ACTIONS_KEYBOARD = [
   ['📅 Расписание', '➕ Добавить'],
-  ['📊 Статистика'],
+  ['📊 Статистика', '✅ Проверить речь'],
 ] as const;
 
 export function registerStartCommand(bot: Telegraf<AuthContext>, db: DatabaseInstance): void {

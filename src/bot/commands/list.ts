@@ -18,6 +18,10 @@ function formatSong(n: number): string {
   return n === 0 ? '?' : String(n);
 }
 
+function formatTalkNumber(n: number): string {
+  return n === 0 ? 'произвольная тема' : `№${n}`;
+}
+
 function addDays(ymd: string, days: number): string {
   const [y, m, d] = ymd.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -45,7 +49,7 @@ function formatScheduleBlock(t: Talk): string {
   const song = formatSong(t.song_number);
   return (
     `🗓 ${formatDateHeader(t.date)}\n` +
-    `   🎵 ${song}  ·  №${t.talk_number} «${t.title}»\n` +
+    `   🎵 ${song}  ·  ${formatTalkNumber(t.talk_number)} «${t.title}»\n` +
     `   👤 ${t.speaker_name}`
   );
 }
@@ -56,6 +60,12 @@ function formatExceptionLine(exception: ScheduleException): string {
   }
   if (exception.exception_type === 'district_congress') {
     return '   🚫 Районный конгресс';
+  }
+  if (exception.exception_type === 'special_talk_before_memorial') {
+    return '   ℹ️ Специальная речь перед Вечерей';
+  }
+  if (exception.exception_type === 'bethel_speaker_visit') {
+    return '   ℹ️ Посещение вефильского докладчика';
   }
   return '   ℹ️ С публичной и служебной речью выступает РС';
 }
@@ -80,7 +90,9 @@ function buildScheduleText(talks: Talk[], exceptions: ScheduleException[]): stri
     const row = byDate.get(date)!;
     const lines: string[] = [`🗓 ${formatDateHeader(date)}`];
     if (row.talk) {
-      lines.push(`   🎵 ${formatSong(row.talk.song_number)}  ·  №${row.talk.talk_number} «${row.talk.title}»`);
+      lines.push(
+        `   🎵 ${formatSong(row.talk.song_number)}  ·  ${formatTalkNumber(row.talk.talk_number)} «${row.talk.title}»`
+      );
       lines.push(`   👤 ${row.talk.speaker_name}`);
     }
     if (row.exception) {

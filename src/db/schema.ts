@@ -89,11 +89,37 @@ export async function initDatabase(connectionUrl: string): Promise<DatabaseInsta
       id SERIAL PRIMARY KEY,
       congregation_id INTEGER NOT NULL REFERENCES congregations(id),
       date DATE NOT NULL,
-      exception_type TEXT NOT NULL CHECK (exception_type IN ('rs_visit', 'district_congress', 'memorial')),
+      exception_type TEXT NOT NULL CHECK (
+        exception_type IN (
+          'rs_visit',
+          'district_congress',
+          'memorial',
+          'special_talk_before_memorial',
+          'bethel_speaker_visit'
+        )
+      ),
       note TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(congregation_id, date)
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE schedule_exceptions
+      DROP CONSTRAINT IF EXISTS schedule_exceptions_exception_type_check;
+  `);
+  await pool.query(`
+    ALTER TABLE schedule_exceptions
+      ADD CONSTRAINT schedule_exceptions_exception_type_check
+      CHECK (
+        exception_type IN (
+          'rs_visit',
+          'district_congress',
+          'memorial',
+          'special_talk_before_memorial',
+          'bethel_speaker_visit'
+        )
+      );
   `);
 
   // Переход на новую семантику: события учитываются только для выходных дат.
