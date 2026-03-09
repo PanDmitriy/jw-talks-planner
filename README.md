@@ -93,16 +93,10 @@ docker compose up -d --build
   - `npm test`
   - `docker build -t jw-talks-planner:ci .`
 - `Deploy` (`.github/workflows/deploy.yml`) запускается при `push` в `main` и вручную через `workflow_dispatch`.
-- Деплой выполняется по SSH на ваш сервер и запускает:
+- Деплой выполняется локально на self-hosted runner этого сервера (без SSH/секретов) и запускает:
   - `git pull --ff-only origin main`
   - `docker compose up -d --build`
-
-Для `Deploy` задайте GitHub Secrets:
-- `DEPLOY_HOST` — хост сервера
-- `DEPLOY_USER` — SSH-пользователь
-- `DEPLOY_SSH_KEY` — приватный SSH-ключ
-- `DEPLOY_PORT` — SSH-порт (обычно `22`)
-- `DEPLOY_PATH` — путь к проекту на сервере (например `/home/pandimun/server/jw-talks-planner`)
+- Требуется, чтобы на сервере был установлен и запущен GitHub Actions self-hosted runner с метками `self-hosted`, `linux`, `x64`.
 
 ## Проверка перед PR
 

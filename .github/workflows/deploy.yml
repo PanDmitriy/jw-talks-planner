@@ -11,20 +11,14 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          script: |
-            set -e
-            cd "${{ secrets.DEPLOY_PATH }}"
-            git fetch --all
-            git checkout main
-            git pull --ff-only origin main
-            docker compose up -d --build
-            docker image prune -f
+      - name: Deploy on local server
+        run: |
+          set -e
+          cd /home/pandimun/server/jw-talks-planner
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          docker compose up -d --build
+          docker image prune -f
