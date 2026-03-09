@@ -29,3 +29,6 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Build Docker image
+        run: docker build -t jw-talks-planner:ci .
