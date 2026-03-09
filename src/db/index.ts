@@ -11,6 +11,7 @@ export type {
   ScheduleExceptionType,
   Congregation,
   UserCongregation,
+  PendingGrant,
   TalkPlan,
   TalkStats,
   SpeakerStats,
@@ -26,6 +27,7 @@ export {
   scheduleExceptionsRepo,
   talksRepo,
   userCongregationsRepo,
+  pendingGrantsRepo,
   notificationsRepo,
   getTalkStats,
   getSpeakerStats,
@@ -34,4 +36,5 @@ export {
   getMergedPlansForCongregation,
   TalkDateValidationError,
   TalkDateBlockedByEventError,
+  TalkDateDuplicateError,
 } from './repositories';

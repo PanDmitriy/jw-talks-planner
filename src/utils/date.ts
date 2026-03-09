@@ -53,3 +53,26 @@ export function parseUserDateToYmd(input: string): string | null {
   const ymd = toYmdString(input);
   return ymd || null;
 }
+
+export function getTodayYmdUtc(): string {
+  return toYmdString(new Date());
+}
+
+export function getUtcDayOfWeek(ymd: string): number {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+export function addDaysToYmdUtc(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return toYmdString(dt);
+}
+
+export function addMonthsToYmdUtc(ymd: string, months: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCMonth(dt.getUTCMonth() + months);
+  return toYmdString(dt);
+}

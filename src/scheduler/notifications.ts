@@ -7,16 +7,10 @@
 import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../db';
 import { talksRepo, congregationsRepo, notificationsRepo } from '../db';
-import { formatDateRu } from '../utils/date';
+import { formatDateRu, getTodayYmdUtc, addDaysToYmdUtc } from '../utils/date';
 
 const NOTIFY_7_DAYS = '7days';
 const NOTIFY_12_HOURS = '12hours';
-
-function addDays(date: Date, days: number): string {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
 
 /**
  * Возвращает ID пользователей, имеющих доступ к общине
@@ -35,9 +29,9 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
   const notifRepo = notificationsRepo(db);
 
   async function run() {
-    const today = addDays(new Date(), 0);
-    const in7Days = addDays(new Date(), 7);
-    const tomorrow = addDays(new Date(), 1);
+    const today = getTodayYmdUtc();
+    const in7Days = addDaysToYmdUtc(today, 7);
+    const tomorrow = addDaysToYmdUtc(today, 1);
 
     // Уведомление «за 7 дней»
     const talksIn7Days = await talks.listUpcoming(in7Days, in7Days);
@@ -58,7 +52,7 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
       for (const userId of userIds) {
         try {
           await bot.telegram.sendMessage(userId, text);
-        } catch (e) {
+        } catch {
           // пользователь мог заблокировать бота
         }
       }
@@ -83,7 +77,7 @@ export function startScheduler(bot: Telegraf, db: DatabaseInstance, intervalMs: 
       for (const userId of userIds) {
         try {
           await bot.telegram.sendMessage(userId, text);
-        } catch (e) {
+        } catch {
           // пользователь мог заблокировать бота
         }
       }

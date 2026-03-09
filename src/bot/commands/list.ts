@@ -10,7 +10,14 @@ import { Markup } from 'telegraf';
 import { talksRepo, congregationsRepo, scheduleExceptionsRepo } from '../../db';
 import type { Talk, ScheduleException } from '../../db/types';
 import { splitMessage } from '../utils/splitMessage';
-import { formatDateRu, toYmdString } from '../../utils/date';
+import {
+  formatDateRu,
+  toYmdString,
+  getTodayYmdUtc,
+  addDaysToYmdUtc,
+  addMonthsToYmdUtc,
+  getUtcDayOfWeek,
+} from '../../utils/date';
 
 const DAY_NAMES = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
 const MONTH_NAMES = [
@@ -43,52 +50,31 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function addDays(ymd: string, days: number): string {
-  const [y, m, d] = ymd.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + days);
-  return dt.toISOString().slice(0, 10);
-}
-
-function addMonths(ymd: string, months: number): string {
-  const [y, m, d] = ymd.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCMonth(dt.getUTCMonth() + months);
-  return dt.toISOString().slice(0, 10);
-}
-
 function getNextMeetingDate(fromDate: string, meetingWeekday: number): string {
   let cursor = fromDate;
   for (let i = 0; i < 7; i += 1) {
     if (getUtcDayOfWeek(cursor) === meetingWeekday) return cursor;
-    cursor = addDays(cursor, 1);
+    cursor = addDaysToYmdUtc(cursor, 1);
   }
   return fromDate;
 }
 
 function getUpcomingMeetingDates(fromDate: string, meetingWeekday: number, monthsAhead: number): string[] {
-  const endDate = addMonths(fromDate, monthsAhead);
+  const endDate = addMonthsToYmdUtc(fromDate, monthsAhead);
   const out: string[] = [];
   let cursor = getNextMeetingDate(fromDate, meetingWeekday);
   while (cursor <= endDate) {
     out.push(cursor);
-    cursor = addDays(cursor, 7);
+    cursor = addDaysToYmdUtc(cursor, 7);
   }
   return out;
-}
-
-function getUtcDayOfWeek(ymd: string): number {
-  const [y, m, d] = ymd.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
 /** Форматирует дату как "Суббота, 10.02.2025" */
 function formatDateHeader(isoDate: string | Date | number): string {
   const ymd = toYmdString(isoDate);
   if (!ymd) return formatDateRu(isoDate);
-  const [y, m, d] = ymd.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
-  const dayName = DAY_NAMES[date.getDay()];
+  const dayName = DAY_NAMES[getUtcDayOfWeek(ymd)];
   return `${dayName}, ${formatDateRu(isoDate)}`;
 }
 
@@ -177,7 +163,7 @@ async function loadScheduleForCongregation(
   const talksAll = await talksRepo(db).listByCongregation(congregationId, { fromDate });
   const talks = talksAll.filter((t) => getUtcDayOfWeek(t.date) === meetingWeekday);
   const maxTalkDate = talks[talks.length - 1]?.date;
-  const fallbackToDate = addDays(fromDate, 120);
+  const fallbackToDate = addDaysToYmdUtc(fromDate, 120);
   const toDate = maxTalkDate && maxTalkDate > fallbackToDate ? maxTalkDate : fallbackToDate;
   const exceptionsAll = await scheduleExceptionsRepo(db).listByCongregation(congregationId, {
     fromDate,
@@ -194,7 +180,7 @@ export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     const ids = ctx.congregationIds ?? [];
     if (ids.length === 0) return;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayYmdUtc();
 
     if (ids.length === 1) {
       const cong = await congRepo.getById(ids[0]);
@@ -239,7 +225,7 @@ export function registerListCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
       await ctx.answerCbQuery('Нет доступа к этой общине.');
       return;
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayYmdUtc();
     const cong = await congRepo.getById(congregationId);
     const { talks, exceptions } = await loadScheduleForCongregation(
       db,

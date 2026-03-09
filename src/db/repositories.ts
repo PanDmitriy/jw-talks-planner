@@ -16,7 +16,9 @@ import type {
   ScheduleException,
   ScheduleExceptionInput,
   ScheduleExceptionType,
+  PendingGrant,
 } from './types';
+import { getTodayYmdUtc, toYmdString } from '../utils/date';
 
 // --- Общины ---
 
@@ -220,6 +222,38 @@ export function userCongregationsRepo(db: DatabaseInstance) {
   };
 }
 
+export function pendingGrantsRepo(db: DatabaseInstance) {
+  return {
+    async add(username: string, congregationId: number): Promise<void> {
+      await db.query(
+        `INSERT INTO pending_grants (username, congregation_id)
+         VALUES ($1, $2)
+         ON CONFLICT (username, congregation_id) DO NOTHING`,
+        [username, congregationId]
+      );
+    },
+    async consume(username: string): Promise<number[]> {
+      const result = await db.query(
+        `DELETE FROM pending_grants
+         WHERE username = $1
+         RETURNING congregation_id`,
+        [username]
+      );
+      return (result.rows as Array<{ congregation_id: number }>).map((row) => row.congregation_id);
+    },
+    async listByUsername(username: string): Promise<PendingGrant[]> {
+      const result = await db.query(
+        `SELECT id, username, congregation_id, created_at
+         FROM pending_grants
+         WHERE username = $1
+         ORDER BY created_at ASC`,
+        [username]
+      );
+      return result.rows as PendingGrant[];
+    },
+  };
+}
+
 // --- Исключения по датам (выходные события) ---
 
 export class TalkDateValidationError extends Error {
@@ -241,6 +275,14 @@ export class TalkDateBlockedByEventError extends Error {
   ) {
     super(`Дата ${date} занята событием ${exceptionType}`);
     this.name = 'TalkDateBlockedByEventError';
+  }
+}
+
+export class TalkDateDuplicateError extends Error {
+  readonly code = 'TALK_DATE_DUPLICATE';
+  constructor(public readonly date: string) {
+    super(`На дату ${date} уже есть запланированная публичная речь`);
+    this.name = 'TalkDateDuplicateError';
   }
 }
 
@@ -361,13 +403,12 @@ export function scheduleExceptionsRepo(db: DatabaseInstance) {
         FROM schedule_exceptions
         WHERE congregation_id = $1`;
       const params: (number | string)[] = [congregationId];
-      let pos = 2;
       if (options?.fromDate) {
-        sql += ` AND date >= $${pos++}`;
+        sql += ` AND date >= $${params.length + 1}`;
         params.push(options.fromDate);
       }
       if (options?.toDate) {
-        sql += ` AND date <= $${pos++}`;
+        sql += ` AND date <= $${params.length + 1}`;
         params.push(options.toDate);
       }
       sql += ' ORDER BY date, id';
@@ -416,19 +457,28 @@ export function talksRepo(db: DatabaseInstance) {
   return {
     async create(input: TalkInput): Promise<number> {
       await validateTalkDateOrThrow(db, input.congregation_id, input.date);
-      const result = await db.query(
-        `INSERT INTO talks (congregation_id, date, song_number, talk_number, title, speaker_name, speaker_phone)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-        [
-          input.congregation_id,
-          input.date,
-          input.song_number,
-          input.talk_number,
-          input.title,
-          input.speaker_name,
-          input.speaker_phone,
-        ]
-      );
+      let result;
+      try {
+        result = await db.query(
+          `INSERT INTO talks (congregation_id, date, song_number, talk_number, title, speaker_name, speaker_phone)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+          [
+            input.congregation_id,
+            input.date,
+            input.song_number,
+            input.talk_number,
+            input.title,
+            input.speaker_name,
+            input.speaker_phone,
+          ]
+        );
+      } catch (error) {
+        const pgError = error as { code?: string; constraint?: string; message?: string };
+        if (pgError.code === '23505' || (pgError.message ?? '').toLowerCase().includes('duplicate')) {
+          throw new TalkDateDuplicateError(input.date);
+        }
+        throw error;
+      }
       return result.rows[0].id as number;
     },
     async update(id: number, input: Partial<TalkInput>): Promise<void> {
@@ -474,7 +524,15 @@ export function talksRepo(db: DatabaseInstance) {
       fields.push('updated_at = NOW()');
       values.push(id);
       const sql = `UPDATE talks SET ${fields.join(', ')} WHERE id = $${pos}`;
-      await db.query(sql, values);
+      try {
+        await db.query(sql, values);
+      } catch (error) {
+        const pgError = error as { code?: string; constraint?: string; message?: string };
+        if (pgError.code === '23505' || (pgError.message ?? '').toLowerCase().includes('duplicate')) {
+          throw new TalkDateDuplicateError(input.date ?? '');
+        }
+        throw error;
+      }
     },
     async delete(id: number): Promise<void> {
       await db.query('DELETE FROM notifications_sent WHERE talk_id = $1', [id]);
@@ -518,13 +576,12 @@ export function talksRepo(db: DatabaseInstance) {
         updated_at::text as updated_at
       FROM talks WHERE congregation_id = $1`;
       const params: (number | string)[] = [congregationId];
-      let pos = 2;
       if (options?.fromDate) {
-        sql += ` AND date >= $${pos++}`;
+        sql += ` AND date >= $${params.length + 1}`;
         params.push(options.fromDate);
       }
       if (options?.toDate) {
-        sql += ` AND date <= $${pos++}`;
+        sql += ` AND date <= $${params.length + 1}`;
         params.push(options.toDate);
       }
       sql += ' ORDER BY date, id';
@@ -575,7 +632,7 @@ export function talksRepo(db: DatabaseInstance) {
       return result.rows as Talk[];
     },
     async listPastByNumber(congregationId: number, talkNumber: number): Promise<Talk[]> {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getTodayYmdUtc();
       const result = await db.query(
         `SELECT
            id,
@@ -604,45 +661,71 @@ export async function getTalkStats(
   db: DatabaseInstance,
   congregationId: number
 ): Promise<TalkStats[]> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayYmdUtc();
   const result = await db.query(
-    `SELECT talk_number, title, COUNT(*)::int as total_count, MAX(date)::text as last_date
-     FROM talks
-     WHERE congregation_id = $1 AND date <= $2
-     GROUP BY talk_number, title
-     ORDER BY talk_number`,
+    `WITH grouped AS (
+      SELECT
+        talk_number,
+        title,
+        COUNT(*)::int as total_count,
+        MAX(date) as last_date
+      FROM talks
+      WHERE congregation_id = $1 AND date <= $2
+      GROUP BY talk_number, title
+    ),
+    latest_talk AS (
+      SELECT
+        t.talk_number,
+        t.title,
+        MAX(t.id) as last_id
+      FROM talks t
+      JOIN grouped g
+        ON g.talk_number = t.talk_number
+        AND g.title = t.title
+        AND g.last_date = t.date
+      WHERE t.congregation_id = $1
+      GROUP BY t.talk_number, t.title
+    )
+    SELECT
+      g.talk_number,
+      g.title,
+      g.total_count,
+      g.last_date as last_date,
+      t.speaker_name as last_speaker
+    FROM grouped g
+    LEFT JOIN latest_talk lt
+      ON lt.talk_number = g.talk_number
+      AND lt.title = g.title
+    LEFT JOIN talks t
+      ON t.id = lt.last_id
+    ORDER BY g.talk_number`,
     [congregationId, today]
   );
-  const rows = result.rows as (TalkStats & { last_date: string })[];
-  const out: TalkStats[] = [];
-  for (const r of rows) {
-    let last_speaker: string | null = null;
-    if (r.last_date) {
-      const lastResult = await db.query(
-        `SELECT speaker_name FROM talks
-         WHERE congregation_id = $1 AND date <= $2 AND talk_number = $3 AND title = $4
-         ORDER BY date DESC LIMIT 1`,
-        [congregationId, today, r.talk_number, r.title]
-      );
-      last_speaker = (lastResult.rows[0] as { speaker_name: string } | undefined)?.speaker_name ?? null;
-    }
-    out.push({
+  const rows = result.rows as Array<{
+    talk_number: number;
+    title: string;
+    total_count: number;
+    last_date: string | Date | null;
+    last_speaker: string | null;
+  }>;
+  return rows.map((r) => {
+    const lastDate = r.last_date ? toYmdString(r.last_date) : null;
+    return {
       talk_id: 0,
       talk_number: r.talk_number,
       title: r.title,
       total_count: r.total_count,
-      last_date: r.last_date ?? null,
-      last_speaker,
-    });
-  }
-  return out;
+      last_date: lastDate,
+      last_speaker: r.last_speaker ?? null,
+    };
+  });
 }
 
 export async function getSpeakerStats(
   db: DatabaseInstance,
   congregationId: number
 ): Promise<SpeakerStats[]> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayYmdUtc();
   const result = await db.query(
     `SELECT speaker_name, speaker_phone, COUNT(*)::int as total_talks
      FROM talks
@@ -655,7 +738,7 @@ export async function getSpeakerStats(
 }
 
 function formatDateForMatrix(isoDate: string): string {
-  const [y, m, d] = isoDate.split('-').map(Number);
+  const [, m, d] = isoDate.split('-').map(Number);
   const day = String(d).padStart(2, '0');
   const month = String(m).padStart(2, '0');
   return `${day}.${month}`;
@@ -666,7 +749,7 @@ export async function getTalkStatsByYearMatrix(
   congregationId: number,
   options?: { fromYear?: number; toYear?: number }
 ): Promise<TalkYearMatrixRow[]> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayYmdUtc();
   const result = await db.query(
     'SELECT talk_number, date::text FROM talks WHERE congregation_id = $1 AND date <= $2 ORDER BY talk_number, date',
     [congregationId, today]

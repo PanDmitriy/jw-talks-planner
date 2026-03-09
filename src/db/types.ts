@@ -68,6 +68,13 @@ export interface UserCongregation {
   granted_at: string;
 }
 
+export interface PendingGrant {
+  id: number;
+  username: string;
+  congregation_id: number;
+  created_at: string;
+}
+
 /** Статистика по речи (по номеру и названию) */
 export interface TalkStats {
   talk_id: number;

@@ -7,7 +7,7 @@ import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
 import { talksRepo, congregationsRepo } from '../../db';
-import { formatDateRu, toYmdString } from '../../utils/date';
+import { formatDateRu, toYmdString, getTodayYmdUtc, getUtcDayOfWeek } from '../../utils/date';
 
 /** Краткая подпись даты для кнопки: "10.02.2025" */
 function formatDateShort(isoDate: string | Date | number): string {
@@ -15,7 +15,7 @@ function formatDateShort(isoDate: string | Date | number): string {
 }
 
 function getDateStatusLabel(ymd: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayYmdUtc();
   return ymd < today ? '🕓 Прошедшая' : '📅 Предстоящая';
 }
 
@@ -28,13 +28,8 @@ interface DeleteState {
 }
 
 function isDateInPeriod(ymd: string, period: TalkPeriod): boolean {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayYmdUtc();
   return period === 'past' ? ymd < today : ymd >= today;
-}
-
-function getUtcDayOfWeek(ymd: string): number {
-  const [y, m, d] = ymd.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
 function getPeriodLabel(period: TalkPeriod): string {
@@ -115,7 +110,7 @@ export function registerDeleteCommand(bot: Telegraf<AuthContext>, db: DatabaseIn
     }
 
     deleteState.set(userId, { ...state, period });
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayYmdUtc();
     const dateButtons = dates.map((d) =>
       Markup.button.callback(
         `${d < today ? '🕓' : '📅'} ${formatDateShort(d)}`,

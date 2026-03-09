@@ -13,9 +13,10 @@ import {
   scheduleExceptionsRepo,
   TalkDateValidationError,
   TalkDateBlockedByEventError,
+  TalkDateDuplicateError,
 } from '../../db';
 import type { TalkInput, ScheduleExceptionType } from '../../db/types';
-import { formatDateRu, parseUserDateToYmd } from '../../utils/date';
+import { formatDateRu, parseUserDateToYmd, getTodayYmdUtc, getUtcDayOfWeek, addDaysToYmdUtc } from '../../utils/date';
 import { formatWeekdayRu } from '../utils/meetingSchedule';
 
 type AddStep =
@@ -62,18 +63,6 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
     return 'Посещение РС';
   }
 
-  function getUtcDayOfWeek(ymd: string): number {
-    const [y, m, d] = ymd.split('-').map(Number);
-    return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  }
-
-  function addDays(ymd: string, days: number): string {
-    const [y, m, d] = ymd.split('-').map(Number);
-    const dt = new Date(Date.UTC(y, m - 1, d));
-    dt.setUTCDate(dt.getUTCDate() + days);
-    return dt.toISOString().slice(0, 10);
-  }
-
   async function validateSelectedDate(
     congregationId: number,
     ymd: string
@@ -118,11 +107,11 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
         const validated = await validateSelectedDate(congregationId, cursor);
         if (validated.ok) out.push(cursor);
       }
-      cursor = addDays(cursor, 1);
+      cursor = addDaysToYmdUtc(cursor, 1);
       scannedDays += 1;
     }
     if (out.length <= limit) return { dates: out, nextCursorFrom: null };
-    return { dates: out.slice(0, limit), nextCursorFrom: addDays(out[limit - 1], 1) };
+    return { dates: out.slice(0, limit), nextCursorFrom: addDaysToYmdUtc(out[limit - 1], 1) };
   }
 
   async function askDateSelection(
@@ -132,7 +121,7 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
     options?: { fromDate?: string; replaceMessage?: boolean }
   ): Promise<void> {
     const congregation = await congRepo.getById(congregationId);
-    const fromDate = options?.fromDate ?? new Date().toISOString().slice(0, 10);
+    const fromDate = options?.fromDate ?? getTodayYmdUtc();
     const { dates: freeDates, nextCursorFrom } = await getNextAvailableDates(congregationId, fromDate, 8);
     if (freeDates.length === 0) {
       const emptyText =
@@ -413,6 +402,13 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
           await ctx.reply(
             `Этот уикенд занят событием: ${getExceptionTypeLabel(error.exceptionType)}. ` +
               'На такую дату публичную речь не планируют.'
+          );
+          return;
+        }
+        if (error instanceof TalkDateDuplicateError) {
+          await ctx.reply(
+            `На дату ${formatDateRu(error.date)} уже есть запланированная речь. ` +
+              'Выберите другую дату через /add.'
           );
           return;
         }

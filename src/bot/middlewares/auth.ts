@@ -4,7 +4,7 @@
 
 import { Context, Markup, Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
-import { userCongregationsRepo, congregationsRepo } from '../../db';
+import { userCongregationsRepo, congregationsRepo, pendingGrantsRepo } from '../../db';
 import { normalizeMeetingTime, parseWeekdayToken, formatWeekdayRu } from '../utils/meetingSchedule';
 
 /** Расширяем контекст: список ID общин, к которым есть доступ у пользователя */
@@ -14,7 +14,7 @@ export interface AuthContext extends Context {
 }
 
 /** ID администраторов из переменной окружения (через запятую) */
-function getAdminIds(): number[] {
+export function getAdminIds(): number[] {
   const raw = process.env.ADMIN_IDS || '';
   return raw
     .split(',')
@@ -76,6 +76,7 @@ export function requireAdmin(ctx: AuthContext, next: () => Promise<void>) {
 export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthContext>) {
   const adminIds = new Set(getAdminIds());
   const congRepo = congregationsRepo(db);
+  const pendingRepo = pendingGrantsRepo(db);
   type GrantWizardStep =
     | 'username'
     | 'congregation_select'
@@ -115,7 +116,7 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
     congregationId: number,
     options?: { scheduleHint?: boolean }
   ): Promise<void> => {
-    getPendingGrants().add(username, congregationId);
+    await pendingRepo.add(username.toLowerCase(), congregationId);
     const cong = await congRepo.getById(congregationId);
     const scheduleInfo = cong
       ? ` (${formatWeekdayRu(cong.meeting_weekday)}, ${cong.meeting_time.slice(0, 5)})`
@@ -176,7 +177,7 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
     const congregations = await congRepo.listAll();
     let congregationId: number;
     if (congregationName) {
-      let cong = congregations.find((c) => c.name.toLowerCase() === congregationName.toLowerCase());
+      const cong = congregations.find((c) => c.name.toLowerCase() === congregationName.toLowerCase());
       if (!cong) {
         if (meetingWeekday === null || meetingTime === null) {
           await ctx.reply(
@@ -189,7 +190,6 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
           meeting_weekday: meetingWeekday,
           meeting_time: meetingTime,
         });
-        cong = await congRepo.getById(congregationId);
       } else {
         congregationId = cong.id;
       }
@@ -209,7 +209,7 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
           meeting_time: meetingTime,
         });
         const cong = await congRepo.getById(congregationId);
-        getPendingGrants().add(username, congregationId);
+        await pendingRepo.add(username.toLowerCase(), congregationId);
         const scheduleInfo = ` (${formatWeekdayRu(cong?.meeting_weekday ?? 0)}, ${(cong?.meeting_time ?? '10:00').slice(0, 5)})`;
         await ctx.reply(
           `Собрание «${cong?.name ?? defaultName}» создано автоматически${scheduleInfo}. ` +
@@ -427,30 +427,12 @@ export function registerGrantCommand(db: DatabaseInstance, bot: Telegraf<AuthCon
   });
 }
 
-/** Ожидающие выдачи доступа по username (в памяти; при перезапуске бота нужно повторить /grant) */
-const pendingByUsername = new Map<string, number[]>();
-
-export function getPendingGrants() {
-  return {
-    add(username: string, congregationId: number) {
-      const list = pendingByUsername.get(username) || [];
-      if (!list.includes(congregationId)) list.push(congregationId);
-      pendingByUsername.set(username, list);
-    },
-    consume(username: string): number[] {
-      const list = pendingByUsername.get(username) || [];
-      pendingByUsername.delete(username);
-      return list;
-    },
-  };
-}
-
 /**
  * При /start проверяем, есть ли для этого username ожидающий grant — если да, выдаём доступ.
  */
 export async function applyPendingGrants(db: DatabaseInstance, userId: number, username: string | null): Promise<void> {
   if (!username) return;
-  const list = getPendingGrants().consume(username);
+  const list = await pendingGrantsRepo(db).consume(username.toLowerCase());
   const userRepo = userCongregationsRepo(db);
   for (const congregationId of list) {
     await userRepo.grant(userId, username, congregationId);

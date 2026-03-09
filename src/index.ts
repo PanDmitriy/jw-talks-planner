@@ -7,6 +7,7 @@ import 'dotenv/config';
 import { Telegraf } from 'telegraf';
 import { initDatabase } from './db';
 import type { AuthContext } from './bot/middlewares/auth';
+import { getAdminIds } from './bot/middlewares/auth';
 import { requireAuth, registerGrantCommand, loggingMiddleware } from './bot/middlewares';
 import { registerAllCommands } from './bot/commands';
 import { startScheduler } from './scheduler/notifications';
@@ -55,6 +56,11 @@ async function main() {
   const databaseUrl = process.env.DATABASE_URL;
   if (typeof databaseUrl !== 'string' || databaseUrl.trim() === '') {
     console.error('Укажите DATABASE_URL в .env (например: postgresql://user:password@localhost:5432/jw_talks)');
+    process.exit(1);
+  }
+  const adminIds = getAdminIds();
+  if (adminIds.length === 0) {
+    console.error('Укажите ADMIN_IDS в .env (через запятую), например: ADMIN_IDS=123456789');
     process.exit(1);
   }
   const db = await initDatabase(databaseUrl);

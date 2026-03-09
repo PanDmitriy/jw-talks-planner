@@ -7,7 +7,7 @@ import { Markup } from 'telegraf';
 import type { DatabaseInstance, ScheduleExceptionType } from '../../db';
 import { congregationsRepo, scheduleExceptionsRepo } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
-import { formatDateRu, parseUserDateToYmd } from '../../utils/date';
+import { formatDateRu, parseUserDateToYmd, getTodayYmdUtc } from '../../utils/date';
 import { splitMessage } from '../utils/splitMessage';
 
 type ExceptionAction = 'add' | 'list' | 'remove';
@@ -108,8 +108,8 @@ function parseExceptionType(raw: string): ScheduleExceptionType | null {
 
 function parseMonthRange(raw: string): MonthRange | null {
   const trimmed = raw.trim();
-  let year = 0;
-  let month = 0;
+  let year: number;
+  let month: number;
   const dotMatch = trimmed.match(/^(\d{2})\.(\d{4})$/);
   const dashMatch = trimmed.match(/^(\d{4})-(\d{2})$/);
   if (dotMatch) {
@@ -277,9 +277,9 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
   ) => {
     const congregation = await congRepo.getById(congregationId);
     const meetingWeekday = congregation?.meeting_weekday ?? 0;
-    const start = fromDate ?? new Date().toISOString().slice(0, 10);
+    const start = fromDate ?? getTodayYmdUtc();
     const rows: Array<Array<ReturnType<typeof Markup.button.callback>>> = [];
-    let nextCursor: string | null = null;
+    let nextCursor: string | null;
 
     if (action === 'remove') {
       const toDate = addDays(start, 365);
@@ -350,7 +350,7 @@ export function registerExceptionsCommand(bot: Telegraf<AuthContext>, db: Databa
       return;
     }
 
-    let action: PendingExceptionAction | null = null;
+    let action: PendingExceptionAction;
     if (sub === 'add') {
       if (args.length < 3) {
         await ctx.reply('Формат: /exceptions add <дата> <тип> [комментарий]');

@@ -13,9 +13,10 @@ import {
   scheduleExceptionsRepo,
   TalkDateValidationError,
   TalkDateBlockedByEventError,
+  TalkDateDuplicateError,
 } from '../../db';
 import type { TalkInput, ScheduleExceptionType } from '../../db/types';
-import { formatDateRu, parseUserDateToYmd } from '../../utils/date';
+import { formatDateRu, parseUserDateToYmd, getTodayYmdUtc, getUtcDayOfWeek } from '../../utils/date';
 import { formatWeekdayRu } from '../utils/meetingSchedule';
 
 type EditStep =
@@ -40,18 +41,13 @@ interface EditTalkState {
 const editState = new Map<number, EditTalkState>();
 
 function getDateStatusLabel(ymd: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayYmdUtc();
   return ymd < today ? '🕓 Прошедшая' : '📅 Предстоящая';
 }
 
 function isDateInPeriod(ymd: string, period: TalkPeriod): boolean {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayYmdUtc();
   return period === 'past' ? ymd < today : ymd >= today;
-}
-
-function getUtcDayOfWeek(ymd: string): number {
-  const [y, m, d] = ymd.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
 function getPeriodLabel(period: TalkPeriod): string {
@@ -99,7 +95,6 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
   const talks = talksRepo(db);
   const congRepo = congregationsRepo(db);
   const exceptionsRepo = scheduleExceptionsRepo(db);
-  const BLOCKING_TYPES = new Set(['district_congress', 'memorial']);
   const MANUAL_TITLE_TYPES = new Set<ScheduleExceptionType>([
     'rs_visit',
     'special_talk_before_memorial',
@@ -173,7 +168,7 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
     editState.set(userId, { step: 'date', congregationId: state.congregationId, period });
     const dateButtons = dates.map((d) =>
       Markup.button.callback(
-        `${d < new Date().toISOString().slice(0, 10) ? '🕓' : '📅'} ${formatDateRu(d)}`,
+        `${d < getTodayYmdUtc() ? '🕓' : '📅'} ${formatDateRu(d)}`,
         `edit:date:${d}`
       )
     );
@@ -395,6 +390,13 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
         await ctx.reply(
           `Этот уикенд занят событием: ${getExceptionTypeLabel(error.exceptionType)}. ` +
             'Публичную речь на такую дату планировать нельзя.'
+        );
+        return;
+      }
+      if (error instanceof TalkDateDuplicateError) {
+        await ctx.reply(
+          `На дату ${formatDateRu(error.date)} уже запланирована публичная речь. ` +
+            'Выберите другую дату.'
         );
         return;
       }

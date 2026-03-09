@@ -40,10 +40,11 @@ export function registerStatsCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     }
 
     // Несколько общин и не указана — выбор кнопкой
-    const buttons = await Promise.all(ids.map(async (id) => {
-      const c = await congRepo.getById(id);
-      return Markup.button.callback(c?.name ?? `Община ${id}`, `stats:cong:${id}`);
-    }));
+    const allCong = await congRepo.listAll();
+    const names = new Map(allCong.map((c) => [c.id, c.name]));
+    const buttons = ids.map((id) =>
+      Markup.button.callback(names.get(id) ?? `Община ${id}`, `stats:cong:${id}`)
+    );
     await ctx.reply('Выберите общину:', Markup.inlineKeyboard(buttons));
   };
 
