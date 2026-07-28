@@ -21,10 +21,10 @@ Telegram-бот на TypeScript (`Telegraf` + `PostgreSQL`) для планир�
 ## Требования
 
 - Node.js 18+
-- Docker + Docker Compose
+- Docker + Docker Compose (только для PostgreSQL)
 - npm или yarn
 
-## Быстрый старт (локально)
+## Запуск
 
 1. Установите зависимости:
 
@@ -43,64 +43,32 @@ cp .env.example .env
 4. Заполните `.env`:
 - `BOT_TOKEN` — токен бота;
 - `ADMIN_IDS` — Telegram ID администраторов (через запятую);
-- `DATABASE_URL` — строка подключения к PostgreSQL в Docker-контейнере (например: `postgresql://jwbot:jwbot@localhost:5433/jw_talks`);
+- `DATABASE_URL` — строка подключения к PostgreSQL;
 - `DEFAULT_CONGREGATION_NAME` — название первой общины при `/grant` без указания общины (опционально).
 
-5. Поднимите PostgreSQL в Docker:
+5. Поднимите PostgreSQL:
 
 ```bash
-docker compose up -d postgres
+docker compose up -d
 ```
 
-6. Запустите бота в dev-режиме:
+6. Запустите бота:
 
 ```bash
+# разработка (hot reload)
 npm run dev
+
+# или после сборки
+npm run build && npm start
 ```
-
-## Production (только Docker Compose)
-
-1. Подготовьте `.env`:
-```bash
-cp .env.example .env
-```
-Заполните минимум `BOT_TOKEN` и `ADMIN_IDS`.
-
-2. Запустите контейнеры:
-
-```bash
-docker compose up -d --build
-```
-
-3. Полезные команды:
-- Логи бота: `docker compose logs -f bot`
-- Остановка: `docker compose down`
 
 Примечания:
-- `DATABASE_URL` для контейнера бота задаётся в `docker-compose.yml`.
 - PostgreSQL публикуется на `localhost:5433` (чтобы не конфликтовать с локальным `5432`).
 - Данные БД хранятся в Docker-томе `postgres-data`.
-- Таблицы в БД создаются автоматически при первом запуске.
-- Production-запуск поддерживается только через Docker Compose.
+- Таблицы создаются автоматически при первом запуске.
+- Ожидающие выдачи доступа через `/grant` (до `/start` пользователя) сохраняются в PostgreSQL и не теряются после перезапуска.
 
-Важно: ожидающие выдачи доступа через `/grant` (до `/start` пользователя) сохраняются в PostgreSQL и не теряются после перезапуска.
-
-## CI/CD (GitHub Actions)
-
-- `CI` (`.github/workflows/ci.yml`) запускается на `push`/`pull_request` и проверяет:
-  - `npm run build`
-  - `npm run lint`
-  - `npm test`
-  - `docker build -t jw-talks-planner:ci .`
-- `Deploy` (`.github/workflows/deploy.yml`) запускается при `push` в `main` и вручную через `workflow_dispatch`.
-- Деплой выполняется локально на self-hosted runner этого сервера (без SSH/секретов) и запускает:
-  - `git pull --ff-only origin main`
-  - `docker compose up -d --build`
-- Требуется, чтобы на сервере был установлен и запущен GitHub Actions self-hosted runner с метками `self-hosted`, `linux`, `x64`.
-
-## Проверка перед PR
-
-Перед отправкой изменений выполните:
+## Проверка после изменений
 
 ```bash
 npm run build

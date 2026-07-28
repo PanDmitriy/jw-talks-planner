@@ -2,7 +2,8 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: jw-talks-planner-db
-    # Порт на хост не публикуем: бот ходит к БД по внутренней сети compose
+    ports:
+      - "5433:5432"
     environment:
       POSTGRES_USER: jwbot
       POSTGRES_PASSWORD: jwbot
@@ -17,20 +18,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-  bot:
-    build: .
-    image: jw-talks-planner:latest
-    container_name: jw-talks-planner
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://jwbot:jwbot@postgres:5432/jw_talks
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    mem_limit: 256m
-    cpus: 1.0
 
 volumes:
   postgres-data:
