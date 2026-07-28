@@ -1,0 +1,37 @@
+---
+description: PostgreSQL слой — repositories, миграции, доменные ошибки
+globs: src/db/**/*.ts
+alwaysApply: false
+---
+
+# Database Layer
+
+Стек: raw `pg` (`DatabaseInstance = Pool`). SQL с плейсхолдерами `$1, $2, …`. ORM не использовать.
+
+## Repositories
+
+Фабрики вида `talksRepo(db)`, `congregationsRepo(db)` в `repositories.ts`. Публичный API реэкспортируй из `src/db/index.ts`.
+
+```typescript
+export function talksRepo(db: DatabaseInstance) {
+  return {
+    async create(input: TalkInput): Promise<number> { /* ... */ },
+  };
+}
+```
+
+Валидацию дат/исключений держи рядом с записью (как `validateTalkDateOrThrow`), чтобы команды не обходили правила.
+
+## Доменные ошибки
+
+Бросай типизированные классы (`TalkDateValidationError`, `TalkDateDuplicateError`, `TalkDateBlockedByEventError`). Unique violation PG (`23505`) мапь в доменную ошибку, остальное — пробрасывай.
+
+## Миграции
+
+Только append в `migrations.ts` (`MIGRATIONS` + таблица `schema_migrations`). Не правь уже применённые `id` миграций. Новая миграция = новый `id` + SQL-statements.
+
+Типы сущностей — в `types.ts`; seed номеров речей — `defaultTalkTitles.ts`.
+
+## Даты в SQL
+
+Колонки `DATE` / сравнение weekday — в терминах UTC YMD. Не вводи локальный timezone в запросы и хелперы.

@@ -1,0 +1,40 @@
+---
+description: Паттерны Telegraf-команд, wizard и callback-кнопок
+globs: src/bot/**/*.ts
+alwaysApply: false
+---
+
+# Bot Commands & Wizards
+
+## Поток
+
+`парсинг → валидация → repo → ответ`. Ошибки пользователю — по-русски без SQL/stack; детали — в `console.error` с командой и шагом.
+
+## Wizard state
+
+In-memory `Map<userId, State>` в файле команды (`add.ts`, `edit.ts`). Без Telegraf scenes/session.
+
+На новой `/команде` в `bot.on('message')`: очисти state и вызови `next()`. `/cancel` чистит Map в каждом wizard; `cancel.ts` — только fallback.
+
+## Auth
+
+В каждом `bot.action`/handler с `congregationId`:
+
+```typescript
+if (!ctx.congregationIds?.includes(congregationId)) {
+  await ctx.answerCbQuery('Нет доступа');
+  return;
+}
+```
+
+## Callbacks и UX
+
+- Callback: `{cmd}:{action}:{params}` (`add:cong:1`, `edit:field:date`).
+- Длинные ответы — `splitMessage`; мастера — «Шаг X из Y» + `/cancel`.
+- Даты/weekday — `src/utils/date.ts` и `bot/utils/meetingSchedule.ts`, без локальных копий.
+
+## Чек-лист
+
+- [ ] Валидация до БД; проверка `congregationIds` в actions
+- [ ] Очистка wizard на `/cancel` и новой команде
+- [ ] Доменная логика покрыта в `tests/integration/` при изменении repo/валидации

@@ -1,0 +1,39 @@
+---
+description: Жёсткие архитектурные ограничения стека и слоёв бота
+alwaysApply: true
+---
+
+# Project Architecture
+
+Telegram-бот: **Telegraf 4 + raw `pg` Pool**. Без ORM/Prisma, без Nest, без отдельного `services/`.
+
+## Слои
+
+| Слой | Где | Ответственность |
+|------|-----|-----------------|
+| Entry | `src/index.ts` | env, middleware chain, `bot.catch`, scheduler |
+| Commands / wizards | `src/bot/commands/` | parse → validate → repo call → reply |
+| Auth | `src/bot/middlewares/auth.ts` | доступ к общинам, `/grant` |
+| Data | `src/db/repositories.ts` | SQL, доменные ошибки, валидация дат |
+| Dates | `src/utils/date.ts` | UTC YMD (`YYYY-MM-DD`) |
+| Shared bot helpers | `src/bot/utils/` | splitMessage, meeting schedule helpers |
+
+Общую логику выноси в `repositories` или `bot/utils`, **не** создавай `services/` без явного запроса.
+
+## Запрещено без согласования
+
+- Prisma / TypeORM / Knex / другой ORM
+- Telegraf `scenes` / `WizardScene` / `session()` middleware
+- Локальный timezone для дат речей (`getDay()`, `toLocaleDateString` без UTC)
+
+## Порядок регистрации (критично)
+
+```text
+loggingMiddleware → registerGrantCommand → requireAuth → registerAllCommands
+```
+
+`/grant` **до** `requireAuth`. Не переноси его в `commands/index.ts`.
+
+## Даты
+
+Все даты речей/исключений — UTC YMD. Парсинг и формат только через `src/utils/date.ts` (`toYmdString`, `parseUserDateToYmd`, `formatDateRu`, `getTodayYmdUtc`).

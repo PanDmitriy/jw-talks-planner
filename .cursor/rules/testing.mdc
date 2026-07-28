@@ -1,0 +1,36 @@
+---
+description: Интеграционные тесты на Vitest + pg-mem
+globs: tests/**/*.ts
+alwaysApply: false
+---
+
+# Testing
+
+Фреймворк: **Vitest**. Стиль: integration через **pg-mem**, не unit-моки Telegraf.
+
+## Каркас БД
+
+```typescript
+async function createTestDb(): Promise<DatabaseInstance> {
+  const db = newDb();
+  const adapter = db.adapters.createPg();
+  const pool = new adapter.Pool();
+  await runMigrations(pool as unknown as DatabaseInstance);
+  return pool as unknown as DatabaseInstance;
+}
+```
+
+Сверяйся с `tests/integration/db-flow.test.ts`: `beforeEach` → свежий `createTestDb()`.
+
+## Что тестировать
+
+- Репозитории и доменные инварианты (weekday, exceptions, duplicates, grants).
+- Критичные связки middleware↔DB (например `applyPendingGrants`).
+- Не поднимай реального Telegram/Telegraf в тестах без явной необходимости.
+
+## Соглашения
+
+- Файлы: `tests/integration/*.test.ts`.
+- Ассерты на классы ошибок: `rejects.toBeInstanceOf(TalkDateValidationError)`.
+- Данные фикстур на русском ок (как в проде); имена тестов — на английском.
+- При новой миграции убедись, что pg-mem + `runMigrations` всё ещё проходят.

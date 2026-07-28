@@ -1,25 +1,38 @@
 ---
-description: Правила безопасного и понятного создания коммитов
+description: Безопасные коммиты и формат сообщений (English Conventional Commits)
 alwaysApply: true
 ---
 
 # Git Commit Rules
 
-- Делай коммит только после прохождения релевантных проверок (`lint`, тесты, сборка при необходимости).
-- Один коммит должен содержать одну логическую единицу изменений; избегай смешивания рефакторинга и фичи.
-- Перед коммитом проверяй `git diff` и исключай случайные правки, временные файлы и локальные артефакты.
-- Не коммить секреты: `.env`, ключи, токены, credentials и любые приватные данные.
-- Сообщение коммита пиши в повелительной форме и с фокусом на намерение изменения.
-- Пиши commit messages лаконично, на техническом английском языке.
-- Используй краткий формат заголовка: `<type>: <summary>`, где `type` = `feat|fix|refactor|test|docs|chore|ci`.
-- Если контекст важен, добавляй тело коммита с объяснением "почему", а не перечислением диффа.
-- Для больших изменений используй серию маленьких атомарных коммитов с прозрачной историей.
-- Не переписывай опубликованную историю (`push --force`) без явного согласования с командой.
+- Коммить только после релевантных проверок (`lint`, тесты, `build` при необходимости).
+- Один коммит = одна логическая единица; не смешивай рефакторинг и фичу.
+- Перед коммитом смотри `git diff`; исключай временные файлы и локальные артефакты.
+- Не коммить секреты: `.env`, ключи, токены, credentials.
+- Большие изменения — серия атомарных коммитов.
+- Не переписывай опубликованную историю (`push --force`) без явного согласования.
 
-## Минимальный шаблон сообщения
+## Message language and style
+
+- **Commit messages in concise technical English only** (never Russian in subject/body).
+- Subject ≤72 chars, one line, imperative (`Add` / `Fix` / `Update`, not `Added`).
+- Focus on **why**, not a file checklist.
+- Header: `<type>: <summary>` where `type` = `feat|fix|refactor|test|docs|chore|ci`.
+
+```text
+# ✅ GOOD
+fix: reject empty talk titles on create
+feat: add congregation filter to talks list
+
+# ❌ BAD
+Исправил баг с названиями
+fix: updated TalkService.ts and TalkController.ts and fixed validation...
+```
+
+Template:
 
 ```text
 <type>: <concise technical summary>
 
-Reason and expected impact.
+Optional body: why this change matters.
 ```
