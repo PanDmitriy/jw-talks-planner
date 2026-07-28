@@ -19,6 +19,8 @@ import type {
   PendingGrant,
 } from './types';
 import { getTodayYmdUtc, toYmdString } from '../utils/date';
+import { assertTalkNumberNotRetiredOnDate } from './retiredTalkNumbers';
+export { TalkNumberRetiredError, isRetiredTalkNumber } from './retiredTalkNumbers';
 
 // --- Общины ---
 
@@ -457,6 +459,7 @@ export function talksRepo(db: DatabaseInstance) {
   return {
     async create(input: TalkInput): Promise<number> {
       await validateTalkDateOrThrow(db, input.congregation_id, input.date);
+      assertTalkNumberNotRetiredOnDate(input.talk_number, input.date);
       let result;
       try {
         result = await db.query(
@@ -482,15 +485,26 @@ export function talksRepo(db: DatabaseInstance) {
       return result.rows[0].id as number;
     },
     async update(id: number, input: Partial<TalkInput>): Promise<void> {
-      if (input.date !== undefined) {
-        let congregationId = input.congregation_id;
-        if (congregationId === undefined) {
-          const existing = await db.query('SELECT congregation_id FROM talks WHERE id = $1', [id]);
-          congregationId = (existing.rows[0] as { congregation_id: number } | undefined)?.congregation_id;
+      if (input.date !== undefined || input.talk_number !== undefined) {
+        const existingResult = await db.query(
+          'SELECT congregation_id, date, talk_number FROM talks WHERE id = $1',
+          [id]
+        );
+        const existing = existingResult.rows[0] as
+          | { congregation_id: number; date: string | Date; talk_number: number }
+          | undefined;
+        if (!existing) {
+          throw new Error(`Речь ${id} не найдена`);
         }
-        if (congregationId !== undefined) {
+
+        if (input.date !== undefined) {
+          const congregationId = input.congregation_id ?? existing.congregation_id;
           await validateTalkDateOrThrow(db, congregationId, input.date);
         }
+
+        const talkNumber = input.talk_number ?? existing.talk_number;
+        const date = input.date ?? toYmdString(existing.date);
+        assertTalkNumberNotRetiredOnDate(talkNumber, date);
       }
 
       const fields: string[] = [];

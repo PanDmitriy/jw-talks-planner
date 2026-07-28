@@ -14,6 +14,7 @@ import {
   TalkDateValidationError,
   TalkDateBlockedByEventError,
   TalkDateDuplicateError,
+  TalkNumberRetiredError,
 } from '../../db';
 import type { TalkInput, ScheduleExceptionType } from '../../db/types';
 import { formatDateRu, parseUserDateToYmd, getTodayYmdUtc, getUtcDayOfWeek, addDaysToYmdUtc } from '../../utils/date';
@@ -410,6 +411,10 @@ export function registerAddCommand(bot: Telegraf<AuthContext>, db: DatabaseInsta
             `На дату ${formatDateRu(error.date)} уже есть запланированная речь. ` +
               'Выберите другую дату через /add.'
           );
+          return;
+        }
+        if (error instanceof TalkNumberRetiredError) {
+          await ctx.reply('План речи больше не используется');
           return;
         }
         throw error;

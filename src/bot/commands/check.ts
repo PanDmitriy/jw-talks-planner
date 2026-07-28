@@ -6,7 +6,7 @@ import type { Telegraf } from 'telegraf';
 import type { DatabaseInstance } from '../../db';
 import type { AuthContext } from '../middlewares/auth';
 import { Markup } from 'telegraf';
-import { talksRepo, congregationsRepo, getTitleForTalk } from '../../db';
+import { talksRepo, congregationsRepo, getTitleForTalk, isRetiredTalkNumber } from '../../db';
 import { splitMessage } from '../utils/splitMessage';
 import { formatDateRu } from '../../utils/date';
 
@@ -48,6 +48,10 @@ export function registerCheckCommand(bot: Telegraf<AuthContext>, db: DatabaseIns
     } else {
       const dates = rows.map((r) => `• ${formatDateRu(r.date)}`).join('\n');
       msg += `✅ Такая речь уже была ${rows.length} раз.\n\nКогда:\n${dates}`;
+    }
+
+    if (isRetiredTalkNumber(talkNumber)) {
+      msg += '\n\nПлан речи больше не используется';
     }
 
     const chunks = splitMessage(msg);

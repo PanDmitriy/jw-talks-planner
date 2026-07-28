@@ -14,6 +14,7 @@ import {
   TalkDateValidationError,
   TalkDateBlockedByEventError,
   TalkDateDuplicateError,
+  TalkNumberRetiredError,
 } from '../../db';
 import type { TalkInput, ScheduleExceptionType } from '../../db/types';
 import { formatDateRu, parseUserDateToYmd, getTodayYmdUtc, getUtcDayOfWeek } from '../../utils/date';
@@ -398,6 +399,10 @@ export function registerEditCommand(bot: Telegraf<AuthContext>, db: DatabaseInst
           `На дату ${formatDateRu(error.date)} уже запланирована публичная речь. ` +
             'Выберите другую дату.'
         );
+        return;
+      }
+      if (error instanceof TalkNumberRetiredError) {
+        await ctx.reply('План речи больше не используется');
         return;
       }
       throw error;

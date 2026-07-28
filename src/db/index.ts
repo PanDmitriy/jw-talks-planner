@@ -37,4 +37,6 @@ export {
   TalkDateValidationError,
   TalkDateBlockedByEventError,
   TalkDateDuplicateError,
+  TalkNumberRetiredError,
+  isRetiredTalkNumber,
 } from './repositories';

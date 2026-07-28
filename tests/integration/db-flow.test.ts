@@ -9,11 +9,15 @@ import {
   TalkDateBlockedByEventError,
   TalkDateDuplicateError,
   TalkDateValidationError,
+  TalkNumberRetiredError,
   userCongregationsRepo,
   getTalkStats,
+  defaultTalkTitlesRepo,
 } from '../../src/db';
 import { runMigrations } from '../../src/db/migrations';
 import { applyPendingGrants } from '../../src/bot/middlewares/auth';
+import { DEFAULT_TALK_TITLES } from '../../src/db/defaultTalkTitles';
+import { RETIRED_TALK_NUMBERS } from '../../src/db/retiredTalkNumbers';
 
 async function createTestDb(): Promise<DatabaseInstance> {
   const db = newDb();
@@ -159,5 +163,110 @@ describe('critical integration flow', () => {
     expect(stats).toHaveLength(1);
     expect(stats[0].total_count).toBe(2);
     expect(stats[0].last_speaker).toBe('Брат B');
+  });
+
+  it('allows retired talk numbers on dates before 2026-09-01', async () => {
+    const congregations = congregationsRepo(db);
+    const talks = talksRepo(db);
+    const congregationId = await congregations.create('До cutoff', {
+      meeting_weekday: 0,
+      meeting_time: '10:00',
+    });
+
+    const id = await talks.create({
+      congregation_id: congregationId,
+      date: '2026-08-30',
+      song_number: 1,
+      talk_number: 84,
+      title: '(Не используется)',
+      speaker_name: 'Брат',
+      speaker_phone: '+79990000000',
+    });
+    expect(id).toBeGreaterThan(0);
+  });
+
+  it('rejects create with retired talk number on or after 2026-09-01', async () => {
+    const congregations = congregationsRepo(db);
+    const talks = talksRepo(db);
+    const congregationId = await congregations.create('После cutoff', {
+      meeting_weekday: 0,
+      meeting_time: '10:00',
+    });
+
+    await expect(
+      talks.create({
+        congregation_id: congregationId,
+        date: '2026-09-06',
+        song_number: 1,
+        talk_number: 84,
+        title: '(Не используется)',
+        speaker_name: 'Брат',
+        speaker_phone: '+79990000000',
+      })
+    ).rejects.toBeInstanceOf(TalkNumberRetiredError);
+  });
+
+  it('rejects update to retired talk number when talk date is on or after cutoff', async () => {
+    const congregations = congregationsRepo(db);
+    const talks = talksRepo(db);
+    const congregationId = await congregations.create('Смена номера', {
+      meeting_weekday: 0,
+      meeting_time: '10:00',
+    });
+
+    const id = await talks.create({
+      congregation_id: congregationId,
+      date: '2026-09-06',
+      song_number: 1,
+      talk_number: 10,
+      title: 'Обычная',
+      speaker_name: 'Брат',
+      speaker_phone: '+79990000000',
+    });
+
+    await expect(talks.update(id, { talk_number: 84 })).rejects.toBeInstanceOf(
+      TalkNumberRetiredError
+    );
+  });
+
+  it('rejects moving retired talk number to a date on or after cutoff', async () => {
+    const congregations = congregationsRepo(db);
+    const talks = talksRepo(db);
+    const congregationId = await congregations.create('Смена даты', {
+      meeting_weekday: 0,
+      meeting_time: '10:00',
+    });
+
+    const id = await talks.create({
+      congregation_id: congregationId,
+      date: '2026-08-30',
+      song_number: 1,
+      talk_number: 84,
+      title: '(Не используется)',
+      speaker_name: 'Брат',
+      speaker_phone: '+79990000000',
+    });
+
+    await expect(talks.update(id, { date: '2026-09-06' })).rejects.toBeInstanceOf(
+      TalkNumberRetiredError
+    );
+  });
+
+  it('marks retired talk numbers as unused in default titles seed and migration', async () => {
+    for (const { number: talk_number, title } of DEFAULT_TALK_TITLES) {
+      await db.query(
+        `INSERT INTO default_talk_titles (talk_number, title)
+         VALUES ($1, $2)
+         ON CONFLICT (talk_number) DO NOTHING`,
+        [talk_number, title]
+      );
+    }
+
+    // Re-run migration path: titles already '(Не используется)' from seed; assert set membership.
+    const titles = await defaultTalkTitlesRepo(db).listAll();
+    for (const n of RETIRED_TALK_NUMBERS) {
+      const row = titles.find((t) => t.talk_number === n);
+      expect(row?.title).toBe('(Не используется)');
+    }
   });
 });

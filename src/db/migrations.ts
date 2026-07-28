@@ -117,6 +117,16 @@ const MIGRATIONS: Migration[] = [
         UNIQUE (congregation_id, date);`,
     ],
   },
+  {
+    id: '003_retire_talk_numbers_from_2026_09',
+    statements: [
+      `UPDATE default_talk_titles
+       SET title = '(Не используется)', updated_at = NOW()
+       WHERE talk_number IN (
+         59, 82, 84, 85, 87, 92, 94, 97, 105, 106, 109, 117, 119, 120, 122, 123, 124, 126, 139, 141, 144, 145, 148, 149, 151, 154, 155, 157, 158, 163, 164, 165, 167, 168
+       );`,
+    ],
+  },
 ];
 
 export async function runMigrations(db: DatabaseInstance): Promise<void> {
