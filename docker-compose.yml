@@ -1,23 +1,45 @@
+version: '3.8'
+
 services:
   postgres:
-    image: postgres:16-alpine
-    container_name: jw-talks-planner-db
+    image: postgres:15-alpine
+    container_name: jw-talks-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres_password}
+      POSTGRES_DB: ${DB_NAME:-jw_talks}
     ports:
       - "5433:5432"
-    environment:
-      POSTGRES_USER: jwbot
-      POSTGRES_PASSWORD: jwbot
-      POSTGRES_DB: jw_talks
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    restart: unless-stopped
-    mem_limit: 256m
-    cpus: 1.0
+    networks:
+      - bot-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jwbot -d jw_talks"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jw-talks-bot
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy 
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${DB_USER:-postgres}:${DB_PASSWORD:-postgres_password}@postgres:5432/${DB_NAME:-jw_talks}?schema=public
+    networks:
+      - bot-network
+
 volumes:
   postgres-data:
+
+networks:
+  bot-network:
+    driver: bridge
