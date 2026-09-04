@@ -34,8 +34,15 @@ services:
       - .env
     environment:
       DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@jw-talks-planner-db:5432/${DB_NAME}?schema=public
-      TELEGRAM_API_ROOT: ${TELEGRAM_API_ROOT}
+      HTTP_PROXY: http://tor-proxy:8118
+      HTTPS_PROXY: http://tor-proxy:8118
+    networks:
+      - bot-network
 
+  tor-proxy:
+    image: dperson/torproxy:latest
+    container_name: jw-talks-tor
+    restart: always
     networks:
       - bot-network
 

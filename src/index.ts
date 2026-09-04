@@ -66,11 +66,7 @@ async function main() {
   const db = await initDatabase(databaseUrl);
 
   // Бот и middleware
-  const bot = new Telegraf<AuthContext>(botToken, {
-    telegram: {
-      apiRoot: process.env.TELEGRAM_API_ROOT
-    }
-  });
+  const bot = new Telegraf<AuthContext>(botToken);
 
   // Логирование входящих обновлений (для отладки)
   bot.use(loggingMiddleware);
