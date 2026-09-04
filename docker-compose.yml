@@ -34,6 +34,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@jw-talks-planner-db:5432/${DB_NAME}?schema=public
+      TELEGRAM_API_ROOT: ${TELEGRAM_API_ROOT}
 
     networks:
       - bot-network
